@@ -19,6 +19,7 @@ import javax.imageio.ImageIO
 import de.sciss.file._
 import de.sciss.neuralgas.ComputeGNG.Result
 import de.sciss.neuralgas.{Algorithm, ComputeGNG, EdgeGNG, ImagePD, NodeGNG}
+import de.sciss.topology.{EdgeView, Kruskal}
 
 object Cracks {
   private final val COOKIE = 0x474E4755 // 'GNGU'
@@ -32,15 +33,79 @@ object Cracks {
 
     if (fOut.isFile && fOut.length() > 0L) {
       println(s"'$fOut' already exists. Not overwriting.")
-      foo(fOut)
+      meat(fOut)
     } else {
       calcGNG(fIn = fIn, fOut = fOut)
     }
   }
 
-  def foo(fBin: File): Unit = {
+  /*
+      - read the neural gas graph
+      - make it a single connected graph
+        by inserting edges between disconnected graph
+      - calculate the minimum spanning tree
+      - calculate the path from a random (?) point to another random (?) point
+      - move along the path with a "perpendicular balancing pole"
+      - the "pole" is trimmed by temporarily adding the walking position to the
+        graph, calculating the overall voronoi, and intersecting with
+        the voronoi region around the walking position.
+      - collect the pixels along the "trimmed pole"
+      - do something with them...
+
+   */
+  def meat(fBin: File): Unit = {
     val compute = readGraph(fBin)
     println(s"Recovered graph - ${compute.nNodes} vertices, ${compute.nEdges} edges.")
+
+    val nodes  = compute.nodes
+    val sorted = compute.edges.iterator.take(compute.nEdges).toVector.sortBy { e =>
+      val n1 = nodes(e.from)
+      val n2 = nodes(e.to  )
+      val x1 = n1.x
+      val y1 = n1.y
+      val x2 = n2.x
+      val y2 = n2.y
+      val dx = x1 - x2
+      val dy = y1 - y2
+      dx * dx + dy * dy
+    }
+
+    implicit object EV extends EdgeView[Int, EdgeGNG] {
+      def sourceVertex(e: EdgeGNG): Int = e.from
+      def targetVertex(e: EdgeGNG): Int = e.to
+    }
+    val mst = Kruskal[Int, EdgeGNG, Vector[EdgeGNG], Vector[EdgeGNG]](sorted)
+    println(s"MST size = ${mst.size}")
+  }
+
+  def intersectLineLineF(a1x: Float, a1y: Float, a2x: Float, a2y: Float,
+                         b1x: Float, b1y: Float, b2x: Float, b2y: Float, eps: Float = 1.0e-6f): Option[Point2D] = {
+    val dax   = a2x - a1x
+    val day   = a2y - a1y
+    val dbx   = b2x - b1x
+    val dby   = b2y - b1y
+    val dx1   = a1x - b1x
+    val dy1   = a1y - b1y
+    val ua_t  = dbx*dy1 - dby*dx1
+    val ub_t  = dax*dy1 - day*dx1
+    val u_b   = dby*dax - dbx*day
+
+    if (u_b != 0) {
+      val ua = ua_t / u_b
+      val ub = ub_t / u_b
+      val min = -eps
+      val max = 1 + eps
+
+      if (min <= ua && ua <= max && min <= ub && ub <= max) {
+        val ix = a1x + ua * dax
+        val iy = a1y + ua * day
+        Some(Point2D(ix, iy))
+      } else {
+        None
+      }
+    } else {
+      None
+    }
   }
 
   def mkCompute(): ComputeGNG = {
