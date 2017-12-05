@@ -13,25 +13,81 @@
 
 package de.sciss.maeanderungen
 
-import java.io.{DataOutputStream, FileOutputStream}
+import java.io.{DataInputStream, DataOutputStream, FileInputStream, FileOutputStream}
 import javax.imageio.ImageIO
 
 import de.sciss.file._
 import de.sciss.neuralgas.ComputeGNG.Result
-import de.sciss.neuralgas.{Algorithm, ComputeGNG, ImagePD}
+import de.sciss.neuralgas.{Algorithm, ComputeGNG, EdgeGNG, ImagePD, NodeGNG}
 
 object Cracks {
+  private final val COOKIE = 0x474E4755 // 'GNGU'
+
   def main(args: Array[String]): Unit = {
-    val projectDir          = file("")   / "data" / "projects"
-    val dirIn               = projectDir / "Imperfect" / "cracks"
-    val fIn                 = dirIn      / "two_bw" / "cracks2_19bw.png"
-    val dirOut              = projectDir / "Maeanderungen" / "cracks"
-    val fOut                = dirOut     / "cracks2_gng.bin"
+    val projectDir  = file("")   / "data" / "projects"
+    val dirIn       = projectDir / "Imperfect" / "cracks"
+    val fIn         = dirIn      / "two_bw" / "cracks2_19bw.png"
+    val dirOut      = projectDir / "Maeanderungen" / "cracks"
+    val fOut        = dirOut     / "cracks2_gng.bin"
 
     if (fOut.isFile && fOut.length() > 0L) {
       println(s"'$fOut' already exists. Not overwriting.")
+      foo(fOut)
     } else {
       calcGNG(fIn = fIn, fOut = fOut)
+    }
+  }
+
+  def foo(fBin: File): Unit = {
+    val compute = readGraph(fBin)
+    println(s"Recovered graph - ${compute.nNodes} vertices, ${compute.nEdges} edges.")
+  }
+
+  def mkCompute(): ComputeGNG = {
+    val compute       = new ComputeGNG
+    compute.algorithm = Algorithm.GNGU
+    compute.GNG_U_B   = true
+    compute
+  }
+
+  def readGraph(f: File): ComputeGNG = {
+    val sIn = new FileInputStream(f)
+    try {
+      val dIn = new DataInputStream(sIn)
+      import dIn._
+      val cookie = readInt()
+      require(cookie == COOKIE, s"Unexpected cookie ${cookie.toHexString} -- expected ${COOKIE.toHexString}")
+      val compute     = new ComputeGNG
+      val nNodes      = readInt()
+      compute.nNodes  = nNodes
+      var i = 0
+      val nodes = compute.nodes
+      while (i < nNodes) {
+        val n     = new NodeGNG
+        n.x       = readFloat()
+        n.y       = readFloat()
+        n.error   = readFloat()
+        n.utility = readFloat()
+        nodes(i)  = n
+        i += 1
+      }
+      val nEdges      = readInt()
+      compute.nEdges  = nEdges
+      i = 0
+      val edges = compute.edges
+      while (i < nEdges) {
+        val e     = new EdgeGNG
+        e.from    = readInt()
+        e.to      = readInt()
+        e.age     = readShort()
+        edges(i)  = e
+        i += 1
+      }
+      compute.maxNodes = compute.nNodes // needed for voronoi
+      compute
+
+    } finally {
+      sIn.close()
     }
   }
 
@@ -40,8 +96,8 @@ object Cracks {
     val img                 = ImageIO.read(fIn)
     val pd                  = new ImagePD(img, true)
     compute.pd              = pd
-    compute.panelWidth  = img.getWidth  / 8
-    compute.panelHeight = img.getHeight / 8
+    compute.panelWidth      = img.getWidth  / 8
+    compute.panelHeight     = img.getHeight / 8
     compute.maxNodes        = 10000; // pd.getNumDots / 8
     println(s"w ${compute.panelWidth}, h ${compute.panelHeight}, maxNodes ${compute.maxNodes}")
     compute.stepSize        = 400
@@ -87,6 +143,7 @@ object Cracks {
     try {
       val dOut = new DataOutputStream(sOut)
       import dOut._
+      writeInt(COOKIE)
       val nNodes = compute.nNodes
       writeInt(nNodes)
       var i = 0
