@@ -29,10 +29,11 @@ import de.sciss.topology.Graph.EdgeMap
 import de.sciss.topology.{EdgeView, Graph, Kruskal}
 
 import scala.annotation.tailrec
-import scala.collection.breakOut
+import scala.collection.{AbstractIterator, breakOut}
 
 object Cracks {
-  private final val COOKIE = 0x474E4755 // 'GNGU'
+  private final val GRAPH_COOKIE  = 0x474E4755 // 'GNGU'
+  private final val POLE_COOKIE   = 0x506F6C65 // 'Pole'
 
   final val SCALE_DOWN = 8
 
@@ -44,20 +45,18 @@ object Cracks {
     val dirOut      = projectDir / "Maeanderungen" / "cracks"
     val fOutRaw     = dirOut     / s"cracks${crackIdx}_gng.bin"
     val fOutFuse    = dirOut     / s"cracks${crackIdx}_fuse.bin"
+    val fOutPoles   = dirOut     / s"cracks${crackIdx}_poles.bin"
 
-    if (fOutRaw.isFile && fOutRaw.length() > 0L) {
-      println(s"'$fOutRaw' already exists. Not overwriting.")
-    } else {
-      calcGNG(fImg = fImgIn, fOut = fOutRaw)
-    }
+    def withFileOut(f: File)(fun: File => Unit): Unit =
+      if (f.isFile && f.length() > 0L) {
+        println(s"'$f' already exists. Not overwriting.")
+      } else {
+        fun(f)
+      }
 
-    if (fOutFuse.isFile && fOutFuse.length() > 0L) {
-      println(s"'$fOutFuse' already exists. Not overwriting.")
-    } else {
-      calcFuse(fIn = fOutRaw, fOut = fOutFuse)
-    }
-
-    traverse(fGraphIn = fOutFuse, fImgIn = fImgIn)
+    withFileOut(fOutRaw  )(f => calcGNG  (fImg      = fImgIn                    , fOut = f))
+    withFileOut(fOutFuse )(f => calcFuse (fIn       = fOutRaw                   , fOut = f))
+    withFileOut(fOutPoles)(f => calcPoles(fGraphIn  = fOutFuse, fImgIn = fImgIn , fOut = f))
   }
 
   /** Partition a graph into a list of disjoint graphs.
@@ -208,7 +207,8 @@ object Cracks {
     - collect the pixels along the "trimmed pole"
     - do something with them...
   */
-  def traverse(fGraphIn: File, fImgIn: File): Unit = {
+  def calcPoles(fGraphIn: File, fImgIn: File, fOut: File): Unit = {
+    requireCanWrite(fOut)
     val compute = readGraph(fGraphIn)
 
     val nodes0 = compute.nodes
@@ -286,7 +286,7 @@ object Cracks {
 
     import kollflitz.Ops._
 
-    val fImgOut1 = file("/data/temp/test1.png")
+    val fImgOut1 = file("/data/temp/test_mst.png")
     if (!fImgOut1.exists()) {
       val imgTest = new BufferedImage((xMax * 2).toInt + 1, (yMax * 2).toInt + 1, BufferedImage.TYPE_INT_ARGB)
       val g = imgTest.createGraphics()
@@ -350,7 +350,8 @@ object Cracks {
     var poleLastProg = 0
     println("Tracing poles...")
     println("_" * 60)
-    val poles: Iterator[LineFloat2D] = path.sliding(2).zipWithIndex.flatMap { case (Seq(ni1, ni2), pathIdx) =>
+
+    val pathLenAng = path.mapPairs { (ni1, ni2) =>
       val n1        = nodes(ni1)
       val n2        = nodes(ni2)
       val x1        = n1.x // * SCALE_DOWN
@@ -359,66 +360,106 @@ object Cracks {
       val y2        = n2.y // * SCALE_DOWN
       val ang0      = math.atan2(y2 - y1, x2 - x1)
       val ang       = ang0 + PiH
-      val dist      = math.sqrt(euclideanSqr(n1, n2))
-      val numSteps  = (dist / pixelStep).toInt + 1
-//      println(numSteps)
-      val sub = (0 until numSteps).iterator.flatMap { step =>
-//        println(s"step $step")
-        val ni =
-          if (step == 0) {
-            ni1
-          } else if (step == numSteps - 1) {
-            compute.nNodes -= 1 // "pop"
-            ni2
-          } else {
-            if (step == 1) {
-              val n = new NodeGNG
-              nodes(compute.nNodes) = n
-              compute.nNodes += 1 // "push" an interpolated node
-            }
-            import numbers.Implicits._
-            val res = compute.nNodes - 1
-            val n = nodes(res)
-            n.x = step.linlin(0, numSteps, n1.x, n2.x)
-            n.y = step.linlin(0, numSteps, n1.y, n2.y)
-            res
-          }
-
-        mkPole(ni, ang)
-      }
-
-      val prog = (pathIdx + 1) * 60 / (pathSz - 1)
-      while (poleLastProg < prog) {
-        print('#')
-        poleLastProg += 1
-      }
-
-      sub
+      val len       = math.sqrt(euclideanSqr(n1, n2))
+      len -> ang
     }
 
-    val fImgOut2 = file("/data/temp/test2.png")
-    if (!fImgOut2.exists()) {
-      val imgTest = new BufferedImage((xMax * 2).toInt + 1, (yMax * 2).toInt + 1, BufferedImage.TYPE_INT_ARGB)
-      val g = imgTest.createGraphics()
-      g.setColor(Color.black)
-      g.fillRect(0, 0, imgTest.getWidth, imgTest.getHeight)
-      g.setColor(Color.white)
-      g.setRenderingHint(RenderingHints.KEY_ANTIALIASING  , RenderingHints.VALUE_ANTIALIAS_ON)
-      g.setRenderingHint(RenderingHints.KEY_STROKE_CONTROL, RenderingHints.VALUE_STROKE_PURE )
-      val ln = new Line2D.Float
+    val pathLenAng2 = pathLenAng.head +: pathLenAng :+ pathLenAng.last
+    val pathIt = path.sliding(2).zip(pathLenAng2.sliding(3)).zipWithIndex
+
+    val poles0: Iterator[LineFloat2D] =
+      pathIt.flatMap { case ((Seq(ni1, ni2), Seq((l1, a1), (l2, a2), (l3, a3))), pathIdx) =>
+        val n1        = nodes(ni1)
+        val n2        = nodes(ni2)
+        val ang       = a2
+        val dist      = l2
+        val numSteps  = (dist / pixelStep).toInt + 1
+  //      println(numSteps)
+        val sub = (0 until numSteps).iterator.flatMap { step =>
+  //        println(s"step $step")
+          val ni =
+            if (step == 0) {
+              ni1
+            } else if (step == numSteps - 1) {
+              compute.nNodes -= 1 // "pop"
+              ni2
+            } else {
+              if (step == 1) {
+                val n = new NodeGNG
+                nodes(compute.nNodes) = n
+                compute.nNodes += 1 // "push" an interpolated node
+              }
+              import numbers.Implicits._
+              val res = compute.nNodes - 1
+              val n = nodes(res)
+              n.x = step.linlin(0, numSteps, n1.x, n2.x)
+              n.y = step.linlin(0, numSteps, n1.y, n2.y)
+              res
+            }
+
+          mkPole(ni, ang)
+        }
+
+        val prog = (pathIdx + 1) * 60 / (pathSz - 1)
+        while (poleLastProg < prog) {
+          print('#')
+          poleLastProg += 1
+        }
+
+        sub
+      }
+
+    val fImgOut2 = file("/data/temp/test_poles.png")
+    val poles: Iterator[LineFloat2D] = if (fImgOut2.exists()) poles0 else new AbstractIterator[LineFloat2D] {
+      def hasNext: Boolean = poles0.hasNext
+
+      private lazy val imgTest  = new BufferedImage((xMax * 2).toInt + 1, (yMax * 2).toInt + 1, BufferedImage.TYPE_INT_ARGB)
+      private lazy val g        = {
+        val _g = imgTest.createGraphics()
+        _g.setColor(Color.black)
+        _g.fillRect(0, 0, imgTest.getWidth, imgTest.getHeight)
+        _g.setColor(Color.white)
+        _g.setRenderingHint(RenderingHints.KEY_ANTIALIASING  , RenderingHints.VALUE_ANTIALIAS_ON)
+        _g.setRenderingHint(RenderingHints.KEY_STROKE_CONTROL, RenderingHints.VALUE_STROKE_PURE )
+        _g
+      }
+      private val ln = new Line2D.Float
 
       def drawLine(l: LineFloat2D): Unit = {
         ln.setLine(l.x1 * 2, l.y1 * 2, l.x2 * 2, l.y2 * 2)
         g.draw(ln)
       }
 
-      poles.foreach(drawLine)
+      def next(): LineFloat2D = {
+        val res = poles0.next()
+        drawLine(res)
+        if (!hasNext) {
+          g.dispose()
+          ImageIO.write(imgTest, "png", fImgOut2)
+        }
+        res
+      }
+    }
 
-      g.dispose()
-      ImageIO.write(imgTest, "png", fImgOut2)
+    val sOut = new FileOutputStream(fOut)
+    try {
+      val dOut = new DataOutputStream(sOut)
+      import dOut._
+      writeInt(POLE_COOKIE)
+      poles.foreach { ln =>
+        writeFloat(ln.x1)
+        writeFloat(ln.y1)
+        writeFloat(ln.x2)
+        writeFloat(ln.y2)
+      }
+
+    } finally {
+      sOut.close()
     }
 
     println()
+
+    // dc-block: Y1 = X1-X0+Y0*gain
   }
 
   def intersectLineLine(a: LineFloat2D, b: LineFloat2D, eps: Float = 1.0e-6f): Option[Point2D] =
@@ -470,7 +511,7 @@ object Cracks {
       val dIn = new DataInputStream(sIn)
       import dIn._
       val cookie = readInt()
-      require(cookie === COOKIE, s"Unexpected cookie ${cookie.toHexString} -- expected ${COOKIE.toHexString}")
+      require(cookie === GRAPH_COOKIE, s"Unexpected cookie ${cookie.toHexString} -- expected ${GRAPH_COOKIE.toHexString}")
       val compute     = new ComputeGNG
       val nNodes      = readInt()
       compute.nNodes  = nNodes
@@ -566,7 +607,7 @@ object Cracks {
     try {
       val dOut = new DataOutputStream(sOut)
       import dOut._
-      writeInt(COOKIE)
+      writeInt(GRAPH_COOKIE)
       val nNodes = compute.nNodes
       writeInt(nNodes)
       var i = 0
