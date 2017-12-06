@@ -41,7 +41,7 @@ object Cracks {
     if (fOut1.isFile && fOut1.length() > 0L) {
       println(s"'$fOut1' already exists. Not overwriting.")
     } else {
-      calcGNG(fIn = fIn, fOut = fOut1)
+      calcGNG(fImg = fIn, fOut = fOut1)
     }
 
     if (fOut2.isFile && fOut2.length() > 0L) {
@@ -50,7 +50,7 @@ object Cracks {
       calcFuse(fIn = fOut1, fOut = fOut2)
     }
 
-    schoko(fOut2)
+    traverse(fIn = fOut2)
   }
 
   /** Partition a graph into a list of disjoint graphs.
@@ -197,7 +197,7 @@ object Cracks {
     - collect the pixels along the "trimmed pole"
     - do something with them...
   */
-  def schoko(fIn: File): Unit = {
+  def traverse(fIn: File): Unit = {
     val compute = readGraph(fIn)
 
     val nodes  = compute.nodes
@@ -222,8 +222,19 @@ object Cracks {
 //    println(s"numIsolated = $numIsolated")
 
     // XXX TODO --- I don't know why this assumption may fail.
+    // (Perhaps we did forgot one partial-graph connection?)
     // E.g. we have a case with nNodes 8658 and mst.size 8652, an not duplicate edges or isolated vertices.
     // assert(mst.size === compute.nNodes - 1, s"mst.size ${mst.size} != compute.nNodes ${compute.nNodes}")
+
+    val vertices: Vector[Int] = Graph.mkVertexSeq(mst)
+    val vStart  = vertices.head
+    val vEnd    = vertices.last
+
+    val edgeMap = Graph.mkBiEdgeMap(mst)
+    val path    = Graph.findUndirectedPath(vStart, vEnd, edgeMap)
+
+    println(s"path of length ${path.size} from $vStart to $vEnd with distance ${math.sqrt(euclideanSqr(nodes(vStart), nodes(vEnd))).toFloat}:")
+    println(path)
   }
 
   def intersectLineLineF(a1x: Float, a1y: Float, a2x: Float, a2y: Float,
@@ -309,11 +320,11 @@ object Cracks {
   def requireCanWrite(f: File): Unit =
   require(f.parentOption.exists(_.canWrite) && (!f.exists() || f.canWrite))
 
-  def calcGNG(fIn: File, fOut: File): Unit = {
+  def calcGNG(fImg: File, fOut: File): Unit = {
     requireCanWrite(fOut)
 
     val compute             = new ComputeGNG
-    val img                 = ImageIO.read(fIn)
+    val img                 = ImageIO.read(fImg)
     val pd                  = new ImagePD(img, true)
     compute.pd              = pd
     compute.panelWidth      = img.getWidth  / 8
