@@ -13,17 +13,18 @@
 
 package de.sciss.maeanderungen
 
-import java.awt.{Color, RenderingHints}
 import java.awt.geom.Line2D
 import java.awt.image.BufferedImage
+import java.awt.{Color, RenderingHints}
 import java.io.{DataInputStream, DataOutputStream, FileInputStream, FileOutputStream}
 import javax.imageio.ImageIO
 
 import de.sciss.equal.Implicits._
 import de.sciss.file._
 import de.sciss.kollflitz
+import de.sciss.numbers
 import de.sciss.neuralgas.ComputeGNG.Result
-import de.sciss.neuralgas.{Algorithm, ComputeGNG, EdgeGNG, EdgeVoronoi, ImagePD, LineFloat2D, NodeGNG, PointFloat2D, Voronoi}
+import de.sciss.neuralgas.{Algorithm, ComputeGNG, EdgeGNG, ImagePD, LineFloat2D, NodeGNG, PointFloat2D}
 import de.sciss.topology.Graph.EdgeMap
 import de.sciss.topology.{EdgeView, Graph, Kruskal}
 
@@ -258,15 +259,16 @@ object Cracks {
     verticesS.iterator.zipWithIndex.foreach { case (ni, i) =>
       compute.nodes(i) = compute.nodes(ni)
     }
-    compute.nNodes = verticesS.size
+    compute.nNodes    = verticesS.size
 
     val edgeMap = Graph.mkBiEdgeMap(mst)
     val vStart  = vMap(vStart0)
     val vEnd    = vMap(vEnd0  )
     val path    = Graph.findUndirectedPath(vStart, vEnd, edgeMap)
-    val nodes   = compute.nodes
+    val pathSz  = path.size
+    import compute.nodes
     val dist = math.sqrt(euclideanSqr(nodes(vStart), nodes(vEnd))).toFloat
-    println(s"Path of length ${path.size} from $vStart to $vEnd with distance $dist.")
+    println(s"Path of length $pathSz from $vStart to $vEnd with distance $dist.")
 //    println(path)
 
     var xMin = Float.MaxValue
@@ -284,8 +286,8 @@ object Cracks {
 
     import kollflitz.Ops._
 
-    val fImgOut = file("/data/temp/test.png")
-    if (!fImgOut.exists()) {
+    val fImgOut1 = file("/data/temp/test1.png")
+    if (!fImgOut1.exists()) {
       val imgTest = new BufferedImage((xMax * 2).toInt + 1, (yMax * 2).toInt + 1, BufferedImage.TYPE_INT_ARGB)
       val g = imgTest.createGraphics()
       g.setColor(Color.black)
@@ -310,51 +312,119 @@ object Cracks {
       path.foreachPair(drawLine)
 
       g.dispose()
-      ImageIO.write(imgTest, "png", fImgOut)
+      ImageIO.write(imgTest, "png", fImgOut1)
     }
 
-    val img         = ImageIO.read(fImgIn)
-    var polyMap     = Map.empty[Point2D, List[LineFloat2D]]
-    val voro: Voronoi = new Voronoi(compute) {
-      override def out_ep(e: EdgeVoronoi): Boolean = {
-        val hasLine = super.out_ep(e)
-        if (hasLine) {
-          val s1 = e.reg(0).coord.immutable
-          val s2 = e.reg(1).coord.immutable
-          val ln = lines(nLines - 1)
-          polyMap += s1 -> (ln :: polyMap.getOrElse(s1, Nil))
-          polyMap += s2 -> (ln :: polyMap.getOrElse(s2, Nil))
-        }
-        hasLine
+    val img     = ImageIO.read(fImgIn)
+    val widthS  = img.getWidth .toFloat / SCALE_DOWN
+    val heightS = img.getHeight.toFloat / SCALE_DOWN
+    val vs      = new VoronoiSearch(compute, widthS.toInt, heightS.toInt)
+    val box: List[LineFloat2D] = List(
+      new LineFloat2D(    0f,      0f, widthS,      0f),
+      new LineFloat2D(    0f, heightS, widthS, heightS),
+      new LineFloat2D(    0f,      0f,     0f, heightS),
+      new LineFloat2D(widthS,      0f, widthS, heightS),
+    )
+    val safeLen = widthS + heightS  // for artificial line segments in mkPole to sect the box
+
+    def mkPole(nodeIdx: Int, ang: Double): Option[LineFloat2D] = {
+      val n       = nodes(nodeIdx)
+      val pt      = Point2D(n.x, n.y)
+//      println(pt)
+      val polyIt  = vs.perform(pt)
+      if (polyIt.isEmpty) return None // XXX TODO --- yeah, there are some problems, I guess with minuscule cells and float res
+
+      val dx      = math.cos(ang).toFloat * safeLen
+      val dy      = math.sin(ang).toFloat * safeLen
+      val nodeLn  = new LineFloat2D(n.x - dx, n.y - dy, n.x + dx, n.y + dy)
+      // append to box, so we're sure we cut somewhere
+      val inter   = (polyIt ++ box.iterator).flatMap(intersectLineLine(_, nodeLn))
+      val pt1     = inter.next()
+      val pt2     = inter.next()
+      val res     = new LineFloat2D(pt1.x, pt1.y, pt2.x, pt2.y)
+      Some(res)
+    }
+
+    val pixelStep = 1.0 / SCALE_DOWN
+    val PiH = math.Pi / 2
+    var poleLastProg = 0
+    println("Tracing poles...")
+    println("_" * 60)
+    val poles: Iterator[LineFloat2D] = path.sliding(2).zipWithIndex.flatMap { case (Seq(ni1, ni2), pathIdx) =>
+      val n1        = nodes(ni1)
+      val n2        = nodes(ni2)
+      val x1        = n1.x // * SCALE_DOWN
+      val y1        = n1.y // * SCALE_DOWN
+      val x2        = n2.x // * SCALE_DOWN
+      val y2        = n2.y // * SCALE_DOWN
+      val ang0      = math.atan2(y2 - y1, x2 - x1)
+      val ang       = ang0 + PiH
+      val dist      = math.sqrt(euclideanSqr(n1, n2))
+      val numSteps  = (dist / pixelStep).toInt + 1
+//      println(numSteps)
+      val sub = (0 until numSteps).iterator.flatMap { step =>
+//        println(s"step $step")
+        val ni =
+          if (step == 0) {
+            ni1
+          } else if (step == numSteps - 1) {
+            compute.nNodes -= 1 // "pop"
+            ni2
+          } else {
+            if (step == 1) {
+              val n = new NodeGNG
+              nodes(compute.nNodes) = n
+              compute.nNodes += 1 // "push" an interpolated node
+            }
+            import numbers.Implicits._
+            val res = compute.nNodes - 1
+            val n = nodes(res)
+            n.x = step.linlin(0, numSteps, n1.x, n2.x)
+            n.y = step.linlin(0, numSteps, n1.y, n2.y)
+            res
+          }
+
+        mkPole(ni, ang)
       }
-    }
-    voro.setSize(img.getWidth / SCALE_DOWN, img.getHeight / SCALE_DOWN)
 
-    def mkPole(nodeIdx: Int, ang: Double): LineFloat2D = {
-      polyMap   = polyMap.empty
-      val error = voro.computeVoronoi()
-      require(!error)
-      val n     = nodes(nodeIdx)
-      val pt    = Point2D(n.x, n.y)
-      val poly  = polyMap(pt)
+      val prog = (pathIdx + 1) * 60 / (pathSz - 1)
+      while (poleLastProg < prog) {
+        print('#')
+        poleLastProg += 1
+      }
 
-      ???
+      sub
     }
 
+    val fImgOut2 = file("/data/temp/test2.png")
+    if (!fImgOut2.exists()) {
+      val imgTest = new BufferedImage((xMax * 2).toInt + 1, (yMax * 2).toInt + 1, BufferedImage.TYPE_INT_ARGB)
+      val g = imgTest.createGraphics()
+      g.setColor(Color.black)
+      g.fillRect(0, 0, imgTest.getWidth, imgTest.getHeight)
+      g.setColor(Color.white)
+      g.setRenderingHint(RenderingHints.KEY_ANTIALIASING  , RenderingHints.VALUE_ANTIALIAS_ON)
+      g.setRenderingHint(RenderingHints.KEY_STROKE_CONTROL, RenderingHints.VALUE_STROKE_PURE )
+      val ln = new Line2D.Float
 
-    val pixelStep = 1.0 // XXX TEST
-    path.foreachPair { (ni1, ni2) =>
-      val n1 = nodes(ni1)
-      val n2 = nodes(ni2)
-      val x1  = n1.x * SCALE_DOWN
-      val y1  = n1.y * SCALE_DOWN
-      val x2  = n2.x * SCALE_DOWN
-      val y2  = n2.y * SCALE_DOWN
+      def drawLine(l: LineFloat2D): Unit = {
+        ln.setLine(l.x1 * 2, l.y1 * 2, l.x2 * 2, l.y2 * 2)
+        g.draw(ln)
+      }
 
+      poles.foreach(drawLine)
 
-
+      g.dispose()
+      ImageIO.write(imgTest, "png", fImgOut2)
     }
+
+    println()
   }
+
+  def intersectLineLine(a: LineFloat2D, b: LineFloat2D, eps: Float = 1.0e-6f): Option[Point2D] =
+    intersectLineLineF(
+      a1x = a.x1, a1y = a.y1, a2x = a.x2, a2y = a.y2,
+      b1x = b.x1, b1y = b.y1, b2x = b.x2, b2y = b.y2, eps = eps)
 
   def intersectLineLineF(a1x: Float, a1y: Float, a2x: Float, a2y: Float,
                          b1x: Float, b1y: Float, b2x: Float, b2y: Float, eps: Float = 1.0e-6f): Option[Point2D] = {
@@ -427,7 +497,6 @@ object Cracks {
         edges(i)  = e
         i += 1
       }
-      compute.maxNodes = compute.nNodes // needed for voronoi
       println(s"Done. ${compute.nNodes} vertices, ${compute.nEdges} edges.")
       compute
 
