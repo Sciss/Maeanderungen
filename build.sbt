@@ -15,6 +15,7 @@ libraryDependencies ++= Seq(
   "de.sciss"          %% "kollflitz"      % "0.2.1",
   "de.sciss"          %% "equal"          % "0.1.2",
   "de.sciss"          %% "topology"       % "1.1.0",
+  "de.sciss"          %% "scalaaudiofile" % "1.4.6",
   "com.github.scopt"  %% "scopt"          % "3.7.0"
 )
 
