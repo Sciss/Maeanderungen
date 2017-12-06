@@ -20,8 +20,9 @@ import de.sciss.file._
 import de.sciss.neuralgas.ComputeGNG.Result
 import de.sciss.neuralgas.{Algorithm, ComputeGNG, EdgeGNG, ImagePD, NodeGNG}
 import de.sciss.topology.Graph.EdgeMap
-import de.sciss.topology.{EdgeView, Kruskal}
+import de.sciss.topology.{EdgeView, Graph, Kruskal}
 
+import scala.annotation.tailrec
 import scala.collection.breakOut
 
 object Cracks {
@@ -48,11 +49,10 @@ object Cracks {
     * can reach each vertex for any other vertex.
     */
   def partition[V, E](edges: Iterable[E], directed: Boolean)
-                     (implicit edgeView: EdgeView[V, E]): List[EdgeMap[V, E]] = {
+                     (implicit edgeView: EdgeView[V, E]): List[Set[E]] = {
     import edgeView._
-    // val vertices = edges.iterator.flatMap(e => sourceVertex(e) :: targetVertex(e) :: Nil).toSet
 
-    edges.foldLeft(List.empty[EdgeMap[V, E]]) { (res, e) =>
+    val resMaps = edges.foldLeft(List.empty[EdgeMap[V, E]]) { (res, e) =>
       val start = sourceVertex(e)
       val end   = targetVertex(e)
       val in    = res.filter { map =>
@@ -71,9 +71,52 @@ object Cracks {
 
       inNew :: out
     }
+
+    resMaps.map(_.valuesIterator.flatten.toSet)
   }
 
-  /*
+  /** Fuses multiple graphs by brute search for closest edges.
+    * (This is not optimized for performance!)
+    *
+    * @param  distance  a function to calculate a distance between any two
+    *                   vertices; this is currently assumed to be symmetric,
+    *                   so `distance(a, b)` should yield the same result
+    *                   as `distance(b, a)` for the method to work correctly.
+    * @param  ord       ordering of the values produced by the `distance` function.
+    *                   This is used to determine the minimal distance among a set of distances.
+    * @return the set of _additional edges_ required to fuse the graph.
+    *         It is _not the total_ set of edges.
+    */
+  def fuse[V, E, A](disjoint: List[Iterable[E]])(distance: (V, V) => A)
+                   (implicit edgeView: EdgeView[V, E], ord: Ordering[A]): Set[(V, V)] = {
+    @tailrec
+    def loop(rem: List[Set[V]], res: Set[(V, V)]): Set[(V, V)] = rem match {
+      case Nil        => res
+      case _ :: Nil   => res
+      case head :: tail =>
+        val candH: Iterator[(V, V, A, Int)] = head.iterator.map { start =>
+          val candT: Iterator[(V, A)] = tail.iterator.map { graph =>
+            graph.iterator.map(end => end -> distance(start, end)).minBy(_._2)
+          }
+          val (end, dist, tailIdx) = candT.zipWithIndex.map { case ((v, a), i) => (v, a, i) } .minBy(_._2)
+          (start, end, dist, tailIdx)
+        }
+        val (start, end, d, tailIdx) = candH.minBy(_._3)
+        val target  = tail(tailIdx)
+        val headNew = head ++ target
+        val tailNew = tail.patch(tailIdx, Nil, 1)
+        // XXX TODO --- yeah, well, we'll calculate a lot of the same distances again
+        // unless we introduce a cache...
+        val remNew  = headNew :: tailNew
+        println(s"${rem.size} - d = $d")
+        loop(remNew, res + (start -> end))
+    }
+
+    val disjointV: List[Set[V]] = disjoint.map(Graph.mkVertexSet[V, E])
+    loop(disjointV, Set.empty)
+  }
+
+    /*
       - read the neural gas graph
       - make it a single connected graph
         by inserting edges between disconnected graph
@@ -96,20 +139,28 @@ object Cracks {
       def targetVertex(e: EdgeGNG): NodeGNG = compute.nodes(e.to  )
     }
 
-    val part  = partition(compute.edges.take(compute.nEdges), directed = false)
-    println(s"Number of disjoint graphs: ${part.size}; total num-vertices = ${part.map(_.size).sum}")
+    val part = partition(compute.edges.take(compute.nEdges), directed = false)
+    println(s"Number of disjoint graphs: ${part.size}") // ; total num-vertices = ${part.map(_.size).sum}
+    assert(part.map(_.size).sum == compute.nEdges)
 
-    val nodes  = compute.nodes
-    val sorted = compute.edges.iterator.take(compute.nEdges).toVector.sortBy { e =>
-      val n1 = nodes(e.from)
-      val n2 = nodes(e.to  )
+    def euclideanSqr(n1: NodeGNG, n2: NodeGNG): Float = {
       val x1 = n1.x
       val y1 = n1.y
       val x2 = n2.x
       val y2 = n2.y
       val dx = x1 - x2
       val dy = y1 - y2
-      dx * dx + dy * dy
+      dx*dx + dy*dy
+    }
+
+    val newEdges = fuse(part)(euclideanSqr)
+    println(s"Yo Chuck, we've got to insert ${newEdges.size} edges.")
+
+    val nodes  = compute.nodes
+    val sorted = compute.edges.iterator.take(compute.nEdges).toVector.sortBy { e =>
+      val n1 = nodes(e.from)
+      val n2 = nodes(e.to  )
+      euclideanSqr(n1, n2)
     }
 
     implicit object EV extends EdgeView[Int, EdgeGNG] {
