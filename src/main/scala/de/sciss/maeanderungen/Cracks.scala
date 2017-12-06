@@ -46,6 +46,7 @@ object Cracks {
     val fOutRaw     = dirOut     / s"cracks${crackIdx}_gng.bin"
     val fOutFuse    = dirOut     / s"cracks${crackIdx}_fuse.bin"
     val fOutPoles   = dirOut     / s"cracks${crackIdx}_poles.bin"
+    val fOutAudio   = dirOut     / s"cracks${crackIdx}_out.aif"
 
     def withFileOut(f: File)(fun: File => Unit): Unit =
       if (f.isFile && f.length() > 0L) {
@@ -54,9 +55,10 @@ object Cracks {
         fun(f)
       }
 
-    withFileOut(fOutRaw  )(f => calcGNG  (fImg      = fImgIn                    , fOut = f))
-    withFileOut(fOutFuse )(f => calcFuse (fIn       = fOutRaw                   , fOut = f))
-    withFileOut(fOutPoles)(f => calcPoles(fGraphIn  = fOutFuse, fImgIn = fImgIn , fOut = f))
+    withFileOut(fOutRaw  )(f => calcGNG  (fImg      = fImgIn                     , fOut = f))
+    withFileOut(fOutFuse )(f => calcFuse (fIn       = fOutRaw                    , fOut = f))
+    withFileOut(fOutPoles)(f => calcPoles(fGraphIn  = fOutFuse , fImgIn = fImgIn , fOut = f))
+    withFileOut(fOutAudio)(f => calcAudio(fPolesIn  = fOutPoles, fImgIn = fImgIn , fOut = f))
   }
 
   /** Partition a graph into a list of disjoint graphs.
@@ -197,6 +199,10 @@ object Cracks {
     def immutable: Point2D = Point2D(in.x, in.y)
   }
 
+  def calcAudio(fPolesIn: File, fImgIn: File, fOut: File): Unit = {
+    ???
+  }
+
   /*
     - calculate the minimum spanning tree
     - calculate the path from a random (?) point to another random (?) point
@@ -206,6 +212,15 @@ object Cracks {
       the voronoi region around the walking position.
     - collect the pixels along the "trimmed pole"
     - do something with them...
+
+    TODO:
+
+    - there are poles that still escape to box boundary; perhaps
+      just a matter of increasing `eps`.
+    - there are a lot of irregularities at the break points,
+      no sure if this is an effect of the "missing" elastic node
+      in the voronoi? perhaps just skip the break points?
+
   */
   def calcPoles(fGraphIn: File, fImgIn: File, fOut: File): Unit = {
     requireCanWrite(fOut)
@@ -345,13 +360,16 @@ object Cracks {
       Some(res)
     }
 
-    val pixelStep = 1.0 / SCALE_DOWN
-    val PiH = math.Pi / 2
+    val pixelStep = (1.0 / 8) / SCALE_DOWN
+    import math.Pi
+    val PiH = Pi / 2
+    val Pi2 = Pi * 2
     var poleLastProg = 0
     println("Tracing poles...")
     println("_" * 60)
 
     val pathLenAng = path.mapPairs { (ni1, ni2) =>
+      // assert(ni1 < compute.nNodes && ni2 < compute.nNodes)
       val n1        = nodes(ni1)
       val n2        = nodes(ni2)
       val x1        = n1.x // * SCALE_DOWN
@@ -367,37 +385,59 @@ object Cracks {
     val pathLenAng2 = pathLenAng.head +: pathLenAng :+ pathLenAng.last
     val pathIt = path.sliding(2).zip(pathLenAng2.sliding(3)).zipWithIndex
 
+    import numbers.Implicits._
+
+//    def debugDegree(d: Double): String = ((d.toDegrees + 360) % 360).roundTo(0.1).toFloat.toString
+
     val poles0: Iterator[LineFloat2D] =
-      pathIt.flatMap { case ((Seq(ni1, ni2), Seq((l1, a1), (l2, a2), (l3, a3))), pathIdx) =>
+      pathIt.flatMap { case ((Seq(ni1, ni2), Seq((l1, _a1), (l2, a2), (l3, _a3))), pathIdx) =>
         val n1        = nodes(ni1)
         val n2        = nodes(ni2)
-        val ang       = a2
-        val dist      = l2
-        val numSteps  = (dist / pixelStep).toInt + 1
-  //      println(numSteps)
-        val sub = (0 until numSteps).iterator.flatMap { step =>
-  //        println(s"step $step")
-          val ni =
-            if (step == 0) {
-              ni1
-            } else if (step == numSteps - 1) {
-              compute.nNodes -= 1 // "pop"
-              ni2
-            } else {
-              if (step == 1) {
-                val n = new NodeGNG
-                nodes(compute.nNodes) = n
-                compute.nNodes += 1 // "push" an interpolated node
-              }
-              import numbers.Implicits._
-              val res = compute.nNodes - 1
-              val n = nodes(res)
-              n.x = step.linlin(0, numSteps, n1.x, n2.x)
-              n.y = step.linlin(0, numSteps, n1.y, n2.y)
-              res
-            }
+        val numSteps  = math.round(l2 / pixelStep).toInt + 1
+        // assert(l2 == math.sqrt(euclideanSqr(n1, n2)), s"for $pathIdx: $l2 != ${math.sqrt(euclideanSqr(n1, n2))}")
 
-          mkPole(ni, ang)
+        val m1 =  math.min(l1, l2) / (2 * l2)
+        val m2 = -math.min(l2, l3) / (2 * l2) + 1.0
+        val a1 = if ((_a1 absdif a2) <= Pi) _a1 else if (_a1 < a2) _a1 + Pi2 else _a1 - Pi2
+        val a3 = if ((_a3 absdif a2) <= Pi) _a3 else if (_a3 < a2) _a3 + Pi2 else _a3 - Pi2
+
+//        println(s"pathIdx $pathIdx,  m1 ${m1.toFloat}, m2 ${m2.toFloat}, a1 ${debugDegree(a1)}, a2 ${debugDegree(a2)}, a3 ${debugDegree(a3)}")
+
+        val sub = (0 until numSteps).iterator.flatMap { step =>
+          val xi: Float = step.linlin(0, numSteps, n1.x, n2.x)
+          val yi: Float = step.linlin(0, numSteps, n1.y, n2.y)
+          val dx = xi - n1.x
+          val dy = yi - n1.y
+          val d0 = math.sqrt(dx*dx + dy*dy)
+          val w  = d0 / l2
+          assert(w >= 0 && w <= 1, s"pathIdx = $pathIdx, step = $step, w = $w")
+
+          val ang = if (w < m1) {
+            val res = w.linlin(-m1, m1, a1, a2)
+//            println(s"  w ${w.toFloat} - ${debugDegree(res)} < m1")
+            res
+          } else if (w > m2) {
+            val res = w.linlin(m2, 1.0 + (1.0 - m2), a2, a3)
+//            println(s"  w ${w.toFloat} - ${debugDegree(res)} > m2")
+            res
+          } else {
+//            println(s"  w ${w.toFloat} - ${debugDegree(a2)} = a2")
+            a2
+          }
+
+          if (step == 0) {
+            mkPole(ni1, ang)
+          } else {
+            val n = new NodeGNG
+            val ni = compute.nNodes
+            nodes(ni) = n
+            compute.nNodes += 1 // "push" an interpolated node
+            n.x = xi
+            n.y = yi
+            val res = mkPole(ni, ang)
+            compute.nNodes -= 1
+            res
+          }
         }
 
         val prog = (pathIdx + 1) * 60 / (pathSz - 1)
