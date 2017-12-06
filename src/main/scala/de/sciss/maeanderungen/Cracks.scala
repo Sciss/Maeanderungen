@@ -13,13 +13,17 @@
 
 package de.sciss.maeanderungen
 
+import java.awt.{Color, RenderingHints}
+import java.awt.geom.Line2D
+import java.awt.image.BufferedImage
 import java.io.{DataInputStream, DataOutputStream, FileInputStream, FileOutputStream}
 import javax.imageio.ImageIO
 
 import de.sciss.equal.Implicits._
 import de.sciss.file._
+import de.sciss.kollflitz
 import de.sciss.neuralgas.ComputeGNG.Result
-import de.sciss.neuralgas.{Algorithm, ComputeGNG, EdgeGNG, ImagePD, NodeGNG}
+import de.sciss.neuralgas.{Algorithm, ComputeGNG, EdgeGNG, EdgeVoronoi, ImagePD, LineFloat2D, NodeGNG, PointFloat2D, Voronoi}
 import de.sciss.topology.Graph.EdgeMap
 import de.sciss.topology.{EdgeView, Graph, Kruskal}
 
@@ -29,28 +33,30 @@ import scala.collection.breakOut
 object Cracks {
   private final val COOKIE = 0x474E4755 // 'GNGU'
 
+  final val SCALE_DOWN = 8
+
   def main(args: Array[String]): Unit = {
     val crackIdx    = 2
     val projectDir  = file("")   / "data" / "projects"
     val dirIn       = projectDir / "Imperfect" / "cracks"
-    val fIn         = dirIn      / "two_bw" / s"cracks${crackIdx}_19bw.png"
+    val fImgIn      = dirIn      / "two_bw" / s"cracks${crackIdx}_19bw.png"
     val dirOut      = projectDir / "Maeanderungen" / "cracks"
-    val fOut1       = dirOut     / s"cracks${crackIdx}_gng.bin"
-    val fOut2       = dirOut     / s"cracks${crackIdx}_fuse.bin"
+    val fOutRaw     = dirOut     / s"cracks${crackIdx}_gng.bin"
+    val fOutFuse    = dirOut     / s"cracks${crackIdx}_fuse.bin"
 
-    if (fOut1.isFile && fOut1.length() > 0L) {
-      println(s"'$fOut1' already exists. Not overwriting.")
+    if (fOutRaw.isFile && fOutRaw.length() > 0L) {
+      println(s"'$fOutRaw' already exists. Not overwriting.")
     } else {
-      calcGNG(fImg = fIn, fOut = fOut1)
+      calcGNG(fImg = fImgIn, fOut = fOutRaw)
     }
 
-    if (fOut2.isFile && fOut2.length() > 0L) {
-      println(s"'$fOut2' already exists. Not overwriting.")
+    if (fOutFuse.isFile && fOutFuse.length() > 0L) {
+      println(s"'$fOutFuse' already exists. Not overwriting.")
     } else {
-      calcFuse(fIn = fOut1, fOut = fOut2)
+      calcFuse(fIn = fOutRaw, fOut = fOutFuse)
     }
 
-    traverse(fIn = fOut2)
+    traverse(fGraphIn = fOutFuse, fImgIn = fImgIn)
   }
 
   /** Partition a graph into a list of disjoint graphs.
@@ -187,6 +193,10 @@ object Cracks {
     writeGraph(compute, fOut = fOut)
   }
 
+  implicit final class PointOps(private val in: PointFloat2D) extends AnyVal {
+    def immutable: Point2D = Point2D(in.x, in.y)
+  }
+
   /*
     - calculate the minimum spanning tree
     - calculate the path from a random (?) point to another random (?) point
@@ -197,14 +207,14 @@ object Cracks {
     - collect the pixels along the "trimmed pole"
     - do something with them...
   */
-  def traverse(fIn: File): Unit = {
-    val compute = readGraph(fIn)
+  def traverse(fGraphIn: File, fImgIn: File): Unit = {
+    val compute = readGraph(fGraphIn)
 
-    val nodes  = compute.nodes
+    val nodes0 = compute.nodes
     val unsorted = compute.edges.iterator.take(compute.nEdges).toVector
     val sorted = unsorted.sortBy { e =>
-      val n1 = nodes(e.from)
-      val n2 = nodes(e.to  )
+      val n1 = nodes0(e.from)
+      val n2 = nodes0(e.to  )
       euclideanSqr(n1, n2)
     }
 
@@ -216,7 +226,7 @@ object Cracks {
       def sourceVertex(e: EdgeGNG): Int = e.from
       def targetVertex(e: EdgeGNG): Int = e.to
     }
-    val mst: Vector[EdgeGNG] = Kruskal[Int, EdgeGNG, Vector[EdgeGNG], Vector[EdgeGNG]](sorted)
+    val mst0: Vector[EdgeGNG] = Kruskal[Int, EdgeGNG, Vector[EdgeGNG], Vector[EdgeGNG]](sorted)
 
 //    val numIsolated = Graph.mkBiEdgeMap(unsorted).count(_._2.isEmpty)
 //    println(s"numIsolated = $numIsolated")
@@ -226,15 +236,124 @@ object Cracks {
     // E.g. we have a case with nNodes 8658 and mst.size 8652, an not duplicate edges or isolated vertices.
     // assert(mst.size === compute.nNodes - 1, s"mst.size ${mst.size} != compute.nNodes ${compute.nNodes}")
 
-    val vertices: Vector[Int] = Graph.mkVertexSeq(mst)
-    val vStart  = vertices.head
-    val vEnd    = vertices.last
+    // we now compress the nodes and edges in `compute` to contain
+    // only those which participate in the MST
+
+    val vertices0: Vector[Int] = Graph.mkVertexSeq(mst0)
+    val vStart0 = vertices0.head
+    val vEnd0   = vertices0.last
+
+    val verticesS   = vertices0.sorted
+    val vMap        = verticesS.iterator.zipWithIndex.toMap
+    val mst         = mst0.iterator.zipWithIndex.map { case (eIn, i) =>
+      val eOut    = new EdgeGNG
+      eOut.from   = vMap(eIn.from)
+      eOut.to     = vMap(eIn.to  )
+      eOut.age    = eIn.age
+      compute.edges(i) = eOut
+      eOut
+    } .toVector
+    compute.nEdges = mst.size
+
+    verticesS.iterator.zipWithIndex.foreach { case (ni, i) =>
+      compute.nodes(i) = compute.nodes(ni)
+    }
+    compute.nNodes = verticesS.size
 
     val edgeMap = Graph.mkBiEdgeMap(mst)
+    val vStart  = vMap(vStart0)
+    val vEnd    = vMap(vEnd0  )
     val path    = Graph.findUndirectedPath(vStart, vEnd, edgeMap)
+    val nodes   = compute.nodes
+    val dist = math.sqrt(euclideanSqr(nodes(vStart), nodes(vEnd))).toFloat
+    println(s"Path of length ${path.size} from $vStart to $vEnd with distance $dist.")
+//    println(path)
 
-    println(s"path of length ${path.size} from $vStart to $vEnd with distance ${math.sqrt(euclideanSqr(nodes(vStart), nodes(vEnd))).toFloat}:")
-    println(path)
+    var xMin = Float.MaxValue
+    var xMax = Float.MinValue
+    var yMin = Float.MaxValue
+    var yMax = Float.MinValue
+    vertices0.foreach { vi =>
+      val n = nodes(vi)
+      xMin = math.min(xMin, n.x)
+      xMax = math.max(xMax, n.x)
+      yMin = math.min(yMin, n.y)
+      yMax = math.max(yMax, n.y)
+    }
+//    println(s"$xMin, $xMax, $yMin, $yMax")
+
+    import kollflitz.Ops._
+
+    val fImgOut = file("/data/temp/test.png")
+    if (!fImgOut.exists()) {
+      val imgTest = new BufferedImage((xMax * 2).toInt + 1, (yMax * 2).toInt + 1, BufferedImage.TYPE_INT_ARGB)
+      val g = imgTest.createGraphics()
+      g.setColor(Color.black)
+      g.fillRect(0, 0, imgTest.getWidth, imgTest.getHeight)
+      g.setColor(Color.white)
+      g.setRenderingHint(RenderingHints.KEY_ANTIALIASING  , RenderingHints.VALUE_ANTIALIAS_ON)
+      g.setRenderingHint(RenderingHints.KEY_STROKE_CONTROL, RenderingHints.VALUE_STROKE_PURE )
+      val ln = new Line2D.Float
+
+      def drawLine(ni1: Int, ni2: Int): Unit = {
+        val n1 = nodes(ni1)
+        val n2 = nodes(ni2)
+        ln.setLine(n1.x * 2, n1.y * 2, n2.x * 2, n2.y * 2)
+        g.draw(ln)
+      }
+
+      mst.foreach { e =>
+        drawLine(e.from, e.to)
+      }
+
+      g.setColor(Color.red)
+      path.foreachPair(drawLine)
+
+      g.dispose()
+      ImageIO.write(imgTest, "png", fImgOut)
+    }
+
+    val img         = ImageIO.read(fImgIn)
+    var polyMap     = Map.empty[Point2D, List[LineFloat2D]]
+    val voro: Voronoi = new Voronoi(compute) {
+      override def out_ep(e: EdgeVoronoi): Boolean = {
+        val hasLine = super.out_ep(e)
+        if (hasLine) {
+          val s1 = e.reg(0).coord.immutable
+          val s2 = e.reg(1).coord.immutable
+          val ln = lines(nLines - 1)
+          polyMap += s1 -> (ln :: polyMap.getOrElse(s1, Nil))
+          polyMap += s2 -> (ln :: polyMap.getOrElse(s2, Nil))
+        }
+        hasLine
+      }
+    }
+    voro.setSize(img.getWidth / SCALE_DOWN, img.getHeight / SCALE_DOWN)
+
+    def mkPole(nodeIdx: Int, ang: Double): LineFloat2D = {
+      polyMap   = polyMap.empty
+      val error = voro.computeVoronoi()
+      require(!error)
+      val n     = nodes(nodeIdx)
+      val pt    = Point2D(n.x, n.y)
+      val poly  = polyMap(pt)
+
+      ???
+    }
+
+
+    val pixelStep = 1.0 // XXX TEST
+    path.foreachPair { (ni1, ni2) =>
+      val n1 = nodes(ni1)
+      val n2 = nodes(ni2)
+      val x1  = n1.x * SCALE_DOWN
+      val y1  = n1.y * SCALE_DOWN
+      val x2  = n2.x * SCALE_DOWN
+      val y2  = n2.y * SCALE_DOWN
+
+
+
+    }
   }
 
   def intersectLineLineF(a1x: Float, a1y: Float, a2x: Float, a2y: Float,
@@ -327,8 +446,8 @@ object Cracks {
     val img                 = ImageIO.read(fImg)
     val pd                  = new ImagePD(img, true)
     compute.pd              = pd
-    compute.panelWidth      = img.getWidth  / 8
-    compute.panelHeight     = img.getHeight / 8
+    compute.panelWidth      = img.getWidth  / SCALE_DOWN
+    compute.panelHeight     = img.getHeight / SCALE_DOWN
     compute.maxNodes        = pd.getNumDots / 10
     compute.stepSize        = 400
     compute.algorithm       = Algorithm.GNGU

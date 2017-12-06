@@ -9,7 +9,7 @@ scalaVersion := "2.12.4"
 scalacOptions ++= Seq("-deprecation", "-unchecked", "-feature", "-Xfuture", "-encoding", "utf8", "-Xlint")
 
 libraryDependencies ++= Seq(
-  "de.sciss"          %  "neuralgas-core" % "2.3.0",
+  "de.sciss"          %  "neuralgas-core" % "2.3.1-SNAPSHOT",
   "de.sciss"          %% "fileutil"       % "1.1.3",
   "de.sciss"          %% "numbers"        % "0.1.3",
   "de.sciss"          %% "kollflitz"      % "0.2.1",
