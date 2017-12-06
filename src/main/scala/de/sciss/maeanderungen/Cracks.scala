@@ -29,17 +29,24 @@ object Cracks {
   private final val COOKIE = 0x474E4755 // 'GNGU'
 
   def main(args: Array[String]): Unit = {
+    val crackIdx    = 2
     val projectDir  = file("")   / "data" / "projects"
     val dirIn       = projectDir / "Imperfect" / "cracks"
-    val fIn         = dirIn      / "two_bw" / "cracks2_19bw.png"
+    val fIn         = dirIn      / "two_bw" / s"cracks${crackIdx}_19bw.png"
     val dirOut      = projectDir / "Maeanderungen" / "cracks"
-    val fOut        = dirOut     / "cracks2_gng.bin"
+    val fOut1       = dirOut     / s"cracks${crackIdx}_gng.bin"
+    val fOut2       = dirOut     / s"cracks${crackIdx}_fuse.bin"
 
-    if (fOut.isFile && fOut.length() > 0L) {
-      println(s"'$fOut' already exists. Not overwriting.")
-      meat(fOut)
+    if (fOut1.isFile && fOut1.length() > 0L) {
+      println(s"'$fOut1' already exists. Not overwriting.")
     } else {
-      calcGNG(fIn = fIn, fOut = fOut)
+      calcGNG(fIn = fIn, fOut = fOut1)
+    }
+
+    if (fOut2.isFile && fOut2.length() > 0L) {
+      println(s"'$fOut2' already exists. Not overwriting.")
+    } else {
+      calcFuse(fIn = fOut1, fOut = fOut2)
     }
   }
 
@@ -101,14 +108,14 @@ object Cracks {
           val (end, dist, tailIdx) = candT.zipWithIndex.map { case ((v, a), i) => (v, a, i) } .minBy(_._2)
           (start, end, dist, tailIdx)
         }
-        val (start, end, d, tailIdx) = candH.minBy(_._3)
+        val (start, end, _ /* d */, tailIdx) = candH.minBy(_._3)
         val target  = tail(tailIdx)
         val headNew = head ++ target
         val tailNew = tail.patch(tailIdx, Nil, 1)
         // XXX TODO --- yeah, well, we'll calculate a lot of the same distances again
         // unless we introduce a cache...
         val remNew  = headNew :: tailNew
-        println(s"${rem.size} - d = $d")
+//        println(s"${rem.size} - d = $d")
         loop(remNew, res + (start -> end))
     }
 
@@ -116,7 +123,22 @@ object Cracks {
     loop(disjointV, Set.empty)
   }
 
-    /*
+  def edgeViewGNG(compute: ComputeGNG): EdgeView[NodeGNG, EdgeGNG] = new EdgeView[NodeGNG, EdgeGNG] {
+    def sourceVertex(e: EdgeGNG): NodeGNG = compute.nodes(e.from)
+    def targetVertex(e: EdgeGNG): NodeGNG = compute.nodes(e.to  )
+  }
+
+  def euclideanSqr(n1: NodeGNG, n2: NodeGNG): Float = {
+    val x1 = n1.x
+    val y1 = n1.y
+    val x2 = n2.x
+    val y2 = n2.y
+    val dx = x1 - x2
+    val dy = y1 - y2
+    dx*dx + dy*dy
+  }
+
+  /*
       - read the neural gas graph
       - make it a single connected graph
         by inserting edges between disconnected graph
@@ -130,31 +152,32 @@ object Cracks {
       - do something with them...
 
    */
-  def meat(fBin: File): Unit = {
-    val compute = readGraph(fBin)
-    println(s"Recovered graph - ${compute.nNodes} vertices, ${compute.nEdges} edges.")
+  def calcFuse(fIn: File, fOut: File): Unit = {
+    val compute = readGraph(fIn)
 
-    implicit object EdgeViewGNG extends EdgeView[NodeGNG, EdgeGNG] {
-      def sourceVertex(e: EdgeGNG): NodeGNG = compute.nodes(e.from)
-      def targetVertex(e: EdgeGNG): NodeGNG = compute.nodes(e.to  )
-    }
-
+    implicit val edgeView: EdgeView[NodeGNG, EdgeGNG] = edgeViewGNG(compute)
     val part = partition(compute.edges.take(compute.nEdges), directed = false)
     println(s"Number of disjoint graphs: ${part.size}") // ; total num-vertices = ${part.map(_.size).sum}
     assert(part.map(_.size).sum == compute.nEdges)
 
-    def euclideanSqr(n1: NodeGNG, n2: NodeGNG): Float = {
-      val x1 = n1.x
-      val y1 = n1.y
-      val x2 = n2.x
-      val y2 = n2.y
-      val dx = x1 - x2
-      val dy = y1 - y2
-      dx*dx + dy*dy
+    print("Fusing graphs... ")
+    val newEdges = fuse(part)(euclideanSqr)
+    println("Done.")
+//    println(s"We've got to insert ${newEdges.size} edges.")
+    newEdges.foreach { case (start, end) =>
+      val e   = new EdgeGNG
+      e.from  = compute.nodes.indexOf(start)
+      e.to    = compute.nodes.indexOf(end  )
+      e.age   = -1
+      compute.edges(compute.nEdges) = e
+      compute.nEdges += 1
     }
 
-    val newEdges = fuse(part)(euclideanSqr)
-    println(s"Yo Chuck, we've got to insert ${newEdges.size} edges.")
+    writeGraph(compute, fOut = fOut)
+  }
+
+  def schoko(fIn: File): Unit = {
+    val compute = readGraph(fIn)
 
     val nodes  = compute.nodes
     val sorted = compute.edges.iterator.take(compute.nEdges).toVector.sortBy { e =>
@@ -209,6 +232,7 @@ object Cracks {
   }
 
   def readGraph(f: File): ComputeGNG = {
+    print(s"Reading graph from '$f'... ")
     val sIn = new FileInputStream(f)
     try {
       val dIn = new DataInputStream(sIn)
@@ -242,6 +266,7 @@ object Cracks {
         i += 1
       }
       compute.maxNodes = compute.nNodes // needed for voronoi
+      println("Done. ${compute.nNodes} vertices, ${compute.nEdges} edges.")
       compute
 
     } finally {
@@ -295,7 +320,12 @@ object Cracks {
     println()
     println(s"GNG took ${(System.currentTimeMillis() - t0)/1000} seconds, and $iter iterations, ${compute.numSignals} signals.")
     // println(compute.nodes.take(compute.nNodes).mkString("\n"))  }
-    println(s"Writing '$fOut'...")
+
+    writeGraph(compute, fOut)
+  }
+
+  def writeGraph(compute: ComputeGNG, fOut: File): Unit = {
+    print(s"Writing '$fOut'... ")
 
     val sOut = new FileOutputStream(fOut)
     try {
