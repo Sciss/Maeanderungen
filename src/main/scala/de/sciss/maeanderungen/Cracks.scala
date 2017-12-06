@@ -19,7 +19,10 @@ import javax.imageio.ImageIO
 import de.sciss.file._
 import de.sciss.neuralgas.ComputeGNG.Result
 import de.sciss.neuralgas.{Algorithm, ComputeGNG, EdgeGNG, ImagePD, NodeGNG}
+import de.sciss.topology.Graph.EdgeMap
 import de.sciss.topology.{EdgeView, Kruskal}
+
+import scala.collection.breakOut
 
 object Cracks {
   private final val COOKIE = 0x474E4755 // 'GNGU'
@@ -36,6 +39,37 @@ object Cracks {
       meat(fOut)
     } else {
       calcGNG(fIn = fIn, fOut = fOut)
+    }
+  }
+
+  /** Partition a graph into a list of disjoint graphs.
+    * Each graph in the result, represented by a set of edges,
+    * is guaranteed to have all vertices connected, i.e. you
+    * can reach each vertex for any other vertex.
+    */
+  def partition[V, E](edges: Iterable[E], directed: Boolean)
+                     (implicit edgeView: EdgeView[V, E]): List[EdgeMap[V, E]] = {
+    import edgeView._
+    // val vertices = edges.iterator.flatMap(e => sourceVertex(e) :: targetVertex(e) :: Nil).toSet
+
+    edges.foldLeft(List.empty[EdgeMap[V, E]]) { (res, e) =>
+      val start = sourceVertex(e)
+      val end   = targetVertex(e)
+      val in    = res.filter { map =>
+        map.contains(start) || map.contains(end)
+      }
+      val out   = if (in.isEmpty) res else res.diff(in)
+      val n0    = Map(start -> Set(e))
+      val n1    = if (directed) n0 else n0 + (end -> Set(e))
+      val inNew = in.fold(n1) { (m1, m2) =>
+        val vertices = m1.keySet ++ m2.keySet
+        vertices.map { v =>
+          val edges = m1.getOrElse(v, Set.empty[E]) ++ m2.getOrElse(v, Set.empty[E])
+          v -> edges
+        } (breakOut)
+      }
+
+      inNew :: out
     }
   }
 
@@ -56,6 +90,14 @@ object Cracks {
   def meat(fBin: File): Unit = {
     val compute = readGraph(fBin)
     println(s"Recovered graph - ${compute.nNodes} vertices, ${compute.nEdges} edges.")
+
+    implicit object EdgeViewGNG extends EdgeView[NodeGNG, EdgeGNG] {
+      def sourceVertex(e: EdgeGNG): NodeGNG = compute.nodes(e.from)
+      def targetVertex(e: EdgeGNG): NodeGNG = compute.nodes(e.to  )
+    }
+
+    val part  = partition(compute.edges.take(compute.nEdges), directed = false)
+    println(s"Number of disjoint graphs: ${part.size}; total num-vertices = ${part.map(_.size).sum}")
 
     val nodes  = compute.nodes
     val sorted = compute.edges.iterator.take(compute.nEdges).toVector.sortBy { e =>
