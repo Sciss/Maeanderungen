@@ -16,6 +16,7 @@ package de.sciss.maeanderungen
 import java.io.{DataInputStream, DataOutputStream, FileInputStream, FileOutputStream}
 import javax.imageio.ImageIO
 
+import de.sciss.equal.Implicits._
 import de.sciss.file._
 import de.sciss.neuralgas.ComputeGNG.Result
 import de.sciss.neuralgas.{Algorithm, ComputeGNG, EdgeGNG, ImagePD, NodeGNG}
@@ -48,6 +49,8 @@ object Cracks {
     } else {
       calcFuse(fIn = fOut1, fOut = fOut2)
     }
+
+    schoko(fOut2)
   }
 
   /** Partition a graph into a list of disjoint graphs.
@@ -85,16 +88,18 @@ object Cracks {
   /** Fuses multiple graphs by brute search for closest edges.
     * (This is not optimized for performance!)
     *
-    * @param  distance  a function to calculate a distance between any two
+    * @param progress   a thunk that is executed once per iteration.
+    *                   there are `disjoint.size - 1` iterations.
+    * @param distance   a function to calculate a distance between any two
     *                   vertices; this is currently assumed to be symmetric,
     *                   so `distance(a, b)` should yield the same result
     *                   as `distance(b, a)` for the method to work correctly.
-    * @param  ord       ordering of the values produced by the `distance` function.
+    * @param ord        ordering of the values produced by the `distance` function.
     *                   This is used to determine the minimal distance among a set of distances.
     * @return the set of _additional edges_ required to fuse the graph.
     *         It is _not the total_ set of edges.
     */
-  def fuse[V, E, A](disjoint: List[Iterable[E]])(distance: (V, V) => A)
+  def fuse[V, E, A](disjoint: List[Iterable[E]], progress: => Unit = ())(distance: (V, V) => A)
                    (implicit edgeView: EdgeView[V, E], ord: Ordering[A]): Set[(V, V)] = {
     @tailrec
     def loop(rem: List[Set[V]], res: Set[(V, V)]): Set[(V, V)] = rem match {
@@ -116,6 +121,7 @@ object Cracks {
         // unless we introduce a cache...
         val remNew  = headNew :: tailNew
 //        println(s"${rem.size} - d = $d")
+        progress
         loop(remNew, res + (start -> end))
     }
 
@@ -139,30 +145,35 @@ object Cracks {
   }
 
   /*
-      - read the neural gas graph
-      - make it a single connected graph
-        by inserting edges between disconnected graph
-      - calculate the minimum spanning tree
-      - calculate the path from a random (?) point to another random (?) point
-      - move along the path with a "perpendicular balancing pole"
-      - the "pole" is trimmed by temporarily adding the walking position to the
-        graph, calculating the overall voronoi, and intersecting with
-        the voronoi region around the walking position.
-      - collect the pixels along the "trimmed pole"
-      - do something with them...
-
+    - make it a single connected graph
+      by inserting edges between disconnected graph
+    - read the neural gas graph
    */
   def calcFuse(fIn: File, fOut: File): Unit = {
+    requireCanWrite(fOut)
     val compute = readGraph(fIn)
 
     implicit val edgeView: EdgeView[NodeGNG, EdgeGNG] = edgeViewGNG(compute)
     val part = partition(compute.edges.take(compute.nEdges), directed = false)
-    println(s"Number of disjoint graphs: ${part.size}") // ; total num-vertices = ${part.map(_.size).sum}
-    assert(part.map(_.size).sum == compute.nEdges)
+    val numParts = part.size
+    println(s"Number of disjoint graphs: $numParts") // ; total num-vertices = ${part.map(_.size).sum}
+    assert(part.map(_.size).sum === compute.nEdges)
 
-    print("Fusing graphs... ")
-    val newEdges = fuse(part)(euclideanSqr)
-    println("Done.")
+    println("Fusing graphs... ")
+    println("_" * 60)
+
+    var partsDone = 0
+    var lastProg  = 0
+    val newEdges = fuse(part, {
+      partsDone += 1
+      val prog = partsDone * 60 / (numParts - 1)
+      while (lastProg < prog) {
+        print('#')
+        lastProg += 1
+      }
+    })(euclideanSqr)
+
+    println(" Done.")
 //    println(s"We've got to insert ${newEdges.size} edges.")
     newEdges.foreach { case (start, end) =>
       val e   = new EdgeGNG
@@ -176,22 +187,43 @@ object Cracks {
     writeGraph(compute, fOut = fOut)
   }
 
+  /*
+    - calculate the minimum spanning tree
+    - calculate the path from a random (?) point to another random (?) point
+    - move along the path with a "perpendicular balancing pole"
+    - the "pole" is trimmed by temporarily adding the walking position to the
+      graph, calculating the overall voronoi, and intersecting with
+      the voronoi region around the walking position.
+    - collect the pixels along the "trimmed pole"
+    - do something with them...
+  */
   def schoko(fIn: File): Unit = {
     val compute = readGraph(fIn)
 
     val nodes  = compute.nodes
-    val sorted = compute.edges.iterator.take(compute.nEdges).toVector.sortBy { e =>
+    val unsorted = compute.edges.iterator.take(compute.nEdges).toVector
+    val sorted = unsorted.sortBy { e =>
       val n1 = nodes(e.from)
       val n2 = nodes(e.to  )
       euclideanSqr(n1, n2)
     }
 
+
+//    val test = sorted.map(e => (e.from, e.to))
+//    assert(test === test.distinct)
+
     implicit object EV extends EdgeView[Int, EdgeGNG] {
       def sourceVertex(e: EdgeGNG): Int = e.from
       def targetVertex(e: EdgeGNG): Int = e.to
     }
-    val mst = Kruskal[Int, EdgeGNG, Vector[EdgeGNG], Vector[EdgeGNG]](sorted)
-    println(s"MST size = ${mst.size}")
+    val mst: Vector[EdgeGNG] = Kruskal[Int, EdgeGNG, Vector[EdgeGNG], Vector[EdgeGNG]](sorted)
+
+//    val numIsolated = Graph.mkBiEdgeMap(unsorted).count(_._2.isEmpty)
+//    println(s"numIsolated = $numIsolated")
+
+    // XXX TODO --- I don't know why this assumption may fail.
+    // E.g. we have a case with nNodes 8658 and mst.size 8652, an not duplicate edges or isolated vertices.
+    // assert(mst.size === compute.nNodes - 1, s"mst.size ${mst.size} != compute.nNodes ${compute.nNodes}")
   }
 
   def intersectLineLineF(a1x: Float, a1y: Float, a2x: Float, a2y: Float,
@@ -238,7 +270,7 @@ object Cracks {
       val dIn = new DataInputStream(sIn)
       import dIn._
       val cookie = readInt()
-      require(cookie == COOKIE, s"Unexpected cookie ${cookie.toHexString} -- expected ${COOKIE.toHexString}")
+      require(cookie === COOKIE, s"Unexpected cookie ${cookie.toHexString} -- expected ${COOKIE.toHexString}")
       val compute     = new ComputeGNG
       val nNodes      = readInt()
       compute.nNodes  = nNodes
@@ -266,7 +298,7 @@ object Cracks {
         i += 1
       }
       compute.maxNodes = compute.nNodes // needed for voronoi
-      println("Done. ${compute.nNodes} vertices, ${compute.nEdges} edges.")
+      println(s"Done. ${compute.nNodes} vertices, ${compute.nEdges} edges.")
       compute
 
     } finally {
@@ -274,15 +306,19 @@ object Cracks {
     }
   }
 
+  def requireCanWrite(f: File): Unit =
+  require(f.parentOption.exists(_.canWrite) && (!f.exists() || f.canWrite))
+
   def calcGNG(fIn: File, fOut: File): Unit = {
+    requireCanWrite(fOut)
+
     val compute             = new ComputeGNG
     val img                 = ImageIO.read(fIn)
     val pd                  = new ImagePD(img, true)
     compute.pd              = pd
     compute.panelWidth      = img.getWidth  / 8
     compute.panelHeight     = img.getHeight / 8
-    compute.maxNodes        = 10000; // pd.getNumDots / 8
-    println(s"w ${compute.panelWidth}, h ${compute.panelHeight}, maxNodes ${compute.maxNodes}")
+    compute.maxNodes        = pd.getNumDots / 10
     compute.stepSize        = 400
     compute.algorithm       = Algorithm.GNGU
     compute.lambdaGNG       = 400
@@ -300,8 +336,8 @@ object Cracks {
     compute.addNode(null)
     compute.addNode(null)
 
-    require(fOut.parentOption.exists(_.canWrite) && (!fOut.exists() || fOut.canWrite))
-
+    println("Running GNG...")
+    println(s"w ${compute.panelWidth}, h ${compute.panelHeight}, maxNodes ${compute.maxNodes}")
     val res             = new Result
     var lastNum         = 0
     var iter            = 0
