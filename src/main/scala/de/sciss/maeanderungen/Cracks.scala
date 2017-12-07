@@ -31,24 +31,146 @@ import de.sciss.topology.{EdgeView, Graph, Kruskal}
 
 import scala.annotation.tailrec
 import scala.collection.{AbstractIterator, breakOut}
+import scala.util.Try
 
 object Cracks {
   private final val GRAPH_COOKIE  = 0x474E4755 // 'GNGU'
   private final val POLE_COOKIE   = 0x506F6C65 // 'Pole'
 
-  final val SCALE_DOWN = 8
+  object Decimation {
+    val names: Seq[String] = Seq(None.name, Variance.name)
+
+    def apply(s: String): Decimation = s match {
+      case None     .name => None
+      case Variance .name => Variance
+    }
+
+    case object None      extends Decimation
+    case object Variance  extends Decimation
+  }
+  sealed trait Decimation extends Product {
+    final val name: String = productPrefix.toLowerCase
+  }
+
+  final case class Config(crackId         : Int         = 19,
+                          blackAndWhite   : Boolean     = true,
+                          startNode       : Int         = -1,
+                          endNode         : Int         = -1,
+                          gngBeta         : Float       = 5.0e-6f,
+                          gngUtility      : Float       = 17f,
+                          rndSeed         : Long        = 0L,
+                          imgScaleDown    : Int         = 8,
+                          maxNodesDown    : Int         = 10,
+                          poleStep        : Int         = 16,
+                          audioBreadthStep: Int         = 2,
+                          audioTimePower  : Float       = 0.5f,
+                          decimation      : Decimation  = Decimation.None,
+                          projectDir      : File        = defaultProjectDir,
+                          tempDir         : File        = defaultTempDir
+                         )
+
+  def defaultProjectDir: File = {
+    val a = file("") / "data"       / "projects"
+    val b = userHome / "Documents"  / "projects"
+    if (a.isDirectory) a else b
+  }
+
+  def defaultTempDir: File = {
+    val a = file("") / "data"       / "temp"
+    val b = userHome / "Documents"  / "temp"
+    if (a.isDirectory) a else b
+  }
 
   def main(args: Array[String]): Unit = {
+    val default = Config()
+
+    val p = new scopt.OptionParser[Config]("Cracks") {
+      opt[Int] ("crack")
+        .text (s"Crack image id (1 to 19; default: ${default.crackId})")
+        .action { (v, c) => c.copy(crackId = v) }
+
+      opt[Boolean] ("bw")
+        .text (s"Use black and white image for pole tracing (default: ${default.blackAndWhite})")
+        .action { (v, c) => c.copy(blackAndWhite = v) }
+
+      opt[Int] ("start-node")
+        .text (s"Start node id of path traversal (-1 for first; default: ${default.startNode})")
+        .action { (v, c) => c.copy(startNode = v) }
+
+      opt[Int] ("end-node")
+        .text (s"End node id of path traversal (-1 for last; default: ${default.endNode})")
+        .action { (v, c) => c.copy(endNode = v) }
+
+      opt[Double] ("gng-utility")
+        .text (s"GNG utility parameter (default: ${default.gngUtility})")
+        .action { (v, c) => c.copy(gngUtility = v.toFloat) }
+
+      opt[Double] ("gng-beta")
+        .text (s"GNG betga parameter (default: ${default.gngBeta})")
+        .action { (v, c) => c.copy(gngBeta = v.toFloat) }
+
+      opt[Long] ("random-seed")
+        .text (s"Seed value for RNG (default: ${default.rndSeed})")
+        .action { (v, c) => c.copy(rndSeed = v) }
+
+      opt[Int] ("image-scale")
+        .text (s"Image scale-down factor (default: ${default.imgScaleDown})")
+        .validate (v => if (v >= 1) success else failure("Must be >= 1"))
+        .action { (v, c) => c.copy(imgScaleDown = v) }
+
+      opt[Int] ("nodes-scale")
+        .text (s"Number of nodes scale-down factor from black pixels (default: ${default.maxNodesDown})")
+        .validate (v => if (v >= 1) success else failure("Must be >= 1"))
+        .action { (v, c) => c.copy(maxNodesDown = v) }
+
+      opt[Int] ("pole-step")
+        .text (s"Pole tracing pixel decimation factor (default: ${default.poleStep})")
+        .validate (v => if (v >= 1) success else failure("Must be >= 1"))
+        .action { (v, c) => c.copy(poleStep = v) }
+
+      opt[Int] ("audio-breadth")
+        .text (s"Pole-to-audio breadth pixel decimation factor (default: ${default.audioBreadthStep})")
+        .validate (v => if (v >= 1) success else failure("Must be >= 1"))
+        .action { (v, c) => c.copy(audioBreadthStep = v) }
+
+      opt[Double] ("audio-time")
+        .text (s"Audio scan time step exponent (default: ${default.audioTimePower})")
+        .validate (v => if (v > 0 && v <= 1) success else failure("Must be > 0 and <= 1"))
+        .action { (v, c) => c.copy(audioTimePower = v.toFloat) }
+
+      opt[String] ("decimation")
+        .text (s"Type of audio decimation (one of ${Decimation.names.mkString(", ")}; default: ${default.decimation.name})")
+        .validate (v => Try(Decimation(v))
+          .fold(_ => failure(s"one of ${Decimation.names.mkString(", ")}"), _ => success))
+        .action { (v, c) => c.copy(decimation = Decimation(v)) }
+
+      opt[File] ("project-dir")
+        .text (s"Projects based directory (default: ${default.projectDir})")
+        .action { (v, c) => c.copy(projectDir = v) }
+
+      opt[File] ("temp-dir")
+        .text (s"Directory for temporary files and illustrations (default: ${default.tempDir})")
+        .action { (v, c) => c.copy(tempDir = v) }
+    }
+    p.parse(args, default).fold(sys.exit(1)){ implicit config => run() }
+  }
+
+  def run()(implicit config: Config): Unit = {
+    import config._
     val crackIdx    = 2
-    val projectDir  = file("")   / "data" / "projects"
+    require(projectDir.isDirectory)
+
     val dirIn       = projectDir / "Imperfect" / "cracks"
-    val fImgInBW    = dirIn      / "two_bw"   / s"cracks${crackIdx}_19bw.png"
-    val fImgInGray  = dirIn      / "two_gray" / s"cracks${crackIdx}_19.jpg"
+    val fImgInBW    = dirIn      / "two_bw"   / s"cracks${crackIdx}_${crackId}bw.png"
+    val fImgInGray  = dirIn      / "two_gray" / s"cracks${crackIdx}_${crackId}.jpg"
     val dirOut      = projectDir / "Maeanderungen" / "cracks"
+
+    dirOut.mkdirs()
+
     val fOutRaw     = dirOut     / s"cracks${crackIdx}_gng.bin"
     val fOutFuse    = dirOut     / s"cracks${crackIdx}_fuse.bin"
-    val fOutPoles   = dirOut     / s"cracks${crackIdx}_poles.bin"
-    val fOutAudio   = dirOut     / s"cracks${crackIdx}_out.aif"
+    val fOutPoles   = dirOut     / s"cracks${crackIdx}_poles_${startNode}_${endNode}.bin"
+    val fOutAudio   = dirOut     / s"cracks${crackIdx}_out_${startNode}_${endNode}.aif"
 
     def withFileOut(f: File)(fun: File => Unit): Unit =
       if (f.isFile && f.length() > 0L) {
@@ -61,7 +183,7 @@ object Cracks {
     withFileOut(fOutFuse )(f => calcFuse (fIn       = fOutRaw                       , fOut = f))
     withFileOut(fOutPoles)(f => calcPoles(fGraphIn  = fOutFuse , fImgIn = fImgInBW  , fOut = f))
 //    withFileOut(fOutAudio)(f => calcAudio(fPolesIn  = fOutPoles, fImgIn = fImgInGray, fOut = f))
-    withFileOut(fOutAudio)(f => calcAudio(fPolesIn  = fOutPoles, fImgIn = fImgInBW  , fOut = f))
+    withFileOut(fOutAudio)(f => calcAudio(fPolesIn  = fOutPoles, fImgIn = if (blackAndWhite) fImgInBW else fImgInGray, fOut = f))
   }
 
   /** Partition a graph into a list of disjoint graphs.
@@ -160,7 +282,7 @@ object Cracks {
       by inserting edges between disconnected graph
     - read the neural gas graph
    */
-  def calcFuse(fIn: File, fOut: File): Unit = {
+  def calcFuse(fIn: File, fOut: File)(implicit config: Config): Unit = {
     requireCanWrite(fOut)
     val compute = readGraph(fIn)
 
@@ -202,7 +324,9 @@ object Cracks {
     def immutable: Point2D = Point2D(in.x, in.y)
   }
 
-  def calcAudio(fPolesIn: File, fImgIn: File, fOut: File): Unit = {
+  def calcAudio(fPolesIn: File, fImgIn: File, fOut: File)(implicit config: Config): Unit = {
+    import config._
+
     requireCanWrite(fOut)
     val img   = ImageIO.read(fImgIn)
     val xMax  = img.getWidth  - 1
@@ -225,7 +349,7 @@ object Cracks {
 
       val afOut = AudioFile.openWrite(fOut, AudioFileSpec(numChannels = 1, sampleRate = 44100))
       try {
-        val pixelStep = 1.0 / 2 // / SCALE_DOWN
+        val pixelStep = 1.0 / audioBreadthStep // / SCALE_DOWN
         val buf     = afOut.buffer()
         val buf0    = buf(0)
         val bufLen  = buf0.length
@@ -240,23 +364,23 @@ object Cracks {
         var dcMem1 = 1f
 
         while (available() > 0) {
-          val x1        = readFloat() * SCALE_DOWN
-          val y1        = readFloat() * SCALE_DOWN
-          val x2        = readFloat() * SCALE_DOWN
-          val y2        = readFloat() * SCALE_DOWN
+          val x1        = readFloat() * imgScaleDown
+          val y1        = readFloat() * imgScaleDown
+          val x2        = readFloat() * imgScaleDown
+          val y2        = readFloat() * imgScaleDown
 //          val ln        = new LineFloat2D(x1, y1, x2, y2)
 //          println(ln)
           val dx        = x2 - x1
           val dy        = y2 - y1
           val len       = math.sqrt(dx*dx + dy*dy)
           val numSteps  = math.round(len / pixelStep).toInt + 1
-          
+
           import numbers.Implicits._
-          
+
           val seq = for (step <- 0 until numSteps) yield {
             val xi: Float = step.linlin(0, numSteps, x1, x2)
             val yi: Float = step.linlin(0, numSteps, y1, y2)
-            
+
             val xj  = xi.toInt.clip(0, xMax)
             val xk  = (xj + 1).min(xMax)
             val yj  = yi.toInt.clip(0, yMax)
@@ -322,7 +446,9 @@ object Cracks {
       in the voronoi? perhaps just skip the break points?
 
   */
-  def calcPoles(fGraphIn: File, fImgIn: File, fOut: File): Unit = {
+  def calcPoles(fGraphIn: File, fImgIn: File, fOut: File)(implicit config: Config): Unit = {
+    import config._
+
     requireCanWrite(fOut)
     val compute = readGraph(fGraphIn)
 
@@ -356,8 +482,13 @@ object Cracks {
     // only those which participate in the MST
 
     val vertices0: Vector[Int] = Graph.mkVertexSeq(mst0)
-    val vStart0 = vertices0.head
-    val vEnd0   = vertices0.last
+    val numVertices = vertices0.size
+    val startNode1  = if (startNode == -1) 0               else startNode
+    val endNode1    = if (endNode   == -1) numVertices - 1 else endNode
+    if (startNode1 < 0 || startNode1 >= vertices0.size) throw new IllegalArgumentException(s"startNode: 0 <= $startNode1 < $numVertices")
+    if (endNode1   < 0 || endNode1   >= vertices0.size) throw new IllegalArgumentException(s"endNode  : 0 <= $endNode1   < $numVertices")
+    val vStart0     = vertices0(startNode1)
+    val vEnd0       = vertices0(endNode1  )
 
     val verticesS   = vertices0.sorted
     val vMap        = verticesS.iterator.zipWithIndex.toMap
@@ -401,7 +532,7 @@ object Cracks {
 
     import kollflitz.Ops._
 
-    val fImgOut1 = file("/data/temp/test_mst.png")
+    val fImgOut1 = tempDir / "test_mst.png"
     if (!fImgOut1.exists()) {
       val imgTest = new BufferedImage((xMax * 2).toInt + 1, (yMax * 2).toInt + 1, BufferedImage.TYPE_INT_ARGB)
       val g = imgTest.createGraphics()
@@ -431,15 +562,17 @@ object Cracks {
     }
 
     val img     = ImageIO.read(fImgIn)
-    val widthS  = img.getWidth .toFloat / SCALE_DOWN
-    val heightS = img.getHeight.toFloat / SCALE_DOWN
+    val widthS  = img.getWidth .toFloat / imgScaleDown
+    val heightS = img.getHeight.toFloat / imgScaleDown
     val vs      = new VoronoiSearch(compute, widthS.toInt, heightS.toInt)
-    val box: List[LineFloat2D] = List(
-      new LineFloat2D(    0f,      0f, widthS,      0f),
-      new LineFloat2D(    0f, heightS, widthS, heightS),
-      new LineFloat2D(    0f,      0f,     0f, heightS),
-      new LineFloat2D(widthS,      0f, widthS, heightS),
-    )
+
+//    val box: List[LineFloat2D] = List(
+//      new LineFloat2D(    0f,      0f, widthS,      0f),
+//      new LineFloat2D(    0f, heightS, widthS, heightS),
+//      new LineFloat2D(    0f,      0f,     0f, heightS),
+//      new LineFloat2D(widthS,      0f, widthS, heightS),
+//    )
+
     val safeLen = widthS + heightS  // for artificial line segments in mkPole to sect the box
 
     def mkPole(nodeIdx: Int, ang: Double): Option[LineFloat2D] = {
@@ -464,7 +597,7 @@ object Cracks {
       } else None
     }
 
-    val pixelStep = (1.0 / 16) / SCALE_DOWN
+    val pixelStep = (1.0 / poleStep) / imgScaleDown
     import math.Pi
     val PiH = Pi / 2
     val Pi2 = Pi * 2
@@ -553,7 +686,7 @@ object Cracks {
         sub
       }
 
-    val fImgOut2 = file("/data/temp/test_poles.png")
+    val fImgOut2 = tempDir / "test_poles.png"
     val poles: Iterator[LineFloat2D] = if (fImgOut2.exists()) poles0 else new AbstractIterator[LineFloat2D] {
       def hasNext: Boolean = poles0.hasNext
 
@@ -691,16 +824,18 @@ object Cracks {
   def requireCanWrite(f: File): Unit =
   require(f.parentOption.exists(_.canWrite) && (!f.exists() || f.canWrite))
 
-  def calcGNG(fImg: File, fOut: File): Unit = {
+  def calcGNG(fImg: File, fOut: File)(implicit config: Config): Unit = {
+    import config._
+
     requireCanWrite(fOut)
 
     val compute             = new ComputeGNG
     val img                 = ImageIO.read(fImg)
     val pd                  = new ImagePD(img, true)
     compute.pd              = pd
-    compute.panelWidth      = img.getWidth  / SCALE_DOWN
-    compute.panelHeight     = img.getHeight / SCALE_DOWN
-    compute.maxNodes        = pd.getNumDots / 10
+    compute.panelWidth      = img.getWidth  / imgScaleDown
+    compute.panelHeight     = img.getHeight / imgScaleDown
+    compute.maxNodes        = pd.getNumDots / maxNodesDown
     compute.stepSize        = 400
     compute.algorithm       = Algorithm.GNGU
     compute.lambdaGNG       = 400
@@ -708,13 +843,13 @@ object Cracks {
     compute.epsilonGNG      = 0.1f // 0.05f
     compute.epsilonGNG2     = 6.0e-4f
     compute.alphaGNG        = 0.5f
-    compute.setBetaGNG(5.0e-6f) // (1.5e-5f) // 5.0e-4f // 1.5e-5f
+    compute.setBetaGNG(gngBeta) // 5.0e-6f  (1.5e-5f) // 5.0e-4f // 1.5e-5f
     compute.noNewNodesGNGB  = false
     compute.GNG_U_B         = true
-    compute.utilityGNG      = 17f // 16f
+    compute.utilityGNG      = gngUtility // 17f // 16f
     compute.autoStopB       = false
     compute.reset()
-    compute.getRNG.setSeed(0L)
+    compute.getRNG.setSeed(rndSeed)
     compute.addNode(null)
     compute.addNode(null)
 
