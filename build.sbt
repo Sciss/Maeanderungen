@@ -16,6 +16,8 @@ libraryDependencies ++= Seq(
   "de.sciss"          %% "equal"          % "0.1.2",
   "de.sciss"          %% "topology"       % "1.1.0",
   "de.sciss"          %% "scalaaudiofile" % "1.4.6",
+  "de.sciss"          %% "fscape-core"    % "2.11.0",
   "com.github.scopt"  %% "scopt"          % "3.7.0"
 )
 
+mainClass in (Compile, run) := Some("de.sciss.maeanderungen.Cracks")

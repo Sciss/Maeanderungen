@@ -34,8 +34,8 @@ import scala.collection.{AbstractIterator, breakOut}
 import scala.util.Try
 
 object Cracks {
-  private final val GRAPH_COOKIE  = 0x474E4755 // 'GNGU'
-  private final val POLE_COOKIE   = 0x506F6C65 // 'Pole'
+  final val GRAPH_COOKIE  = 0x474E4755 // 'GNGU'
+  final val POLE_COOKIE   = 0x506F6C65 // 'Pole'
 
   object Decimation {
     val names: Seq[String] = Seq(None.name, Variance.name)
@@ -169,7 +169,7 @@ object Cracks {
 
     val fOutRaw     = dirOut     / s"cracks${crackIdx}_gng.bin"
     val fOutFuse    = dirOut     / s"cracks${crackIdx}_fuse.bin"
-    val fOutPoles   = dirOut     / s"cracks${crackIdx}_poles_${startNode}_${endNode}.bin"
+    val fOutPoles   = dirOut     / s"cracks${crackIdx}_poles_${startNode}_${endNode}.aif"
     val fOutAudio   = dirOut     / s"cracks${crackIdx}_out_${startNode}_${endNode}.aif"
 
     def withFileOut(f: File)(fun: File => Unit): Unit =
@@ -718,20 +718,30 @@ object Cracks {
       }
     }
 
-    val sOut = new FileOutputStream(fOut)
+    val afOut = AudioFile.openWrite(fOut, AudioFileSpec(numChannels = 4, sampleRate = 44100))
     try {
-      val dOut = new DataOutputStream(sOut)
-      import dOut._
-      writeInt(POLE_COOKIE)
-      poles.foreach { ln =>
-        writeFloat(ln.x1)
-        writeFloat(ln.y1)
-        writeFloat(ln.x2)
-        writeFloat(ln.y2)
+      val bufLen  = 1024
+      val buf     = afOut.buffer(bufLen)
+      var bufOff  = 0
+
+      def flush(): Unit = if (bufOff > 0) {
+        afOut.write(buf, 0, bufOff)
+        bufOff = 0
       }
 
+      poles.foreach { ln =>
+        buf(0)(bufOff) = ln.x1
+        buf(1)(bufOff) = ln.y1
+        buf(2)(bufOff) = ln.x2
+        buf(3)(bufOff) = ln.y2
+        bufOff += 1
+        if (bufOff == bufLen) flush()
+      }
+
+      flush()
+
     } finally {
-      sOut.close()
+      afOut.close()
     }
 
     println()
