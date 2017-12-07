@@ -42,7 +42,8 @@ object Cracks {
     val crackIdx    = 2
     val projectDir  = file("")   / "data" / "projects"
     val dirIn       = projectDir / "Imperfect" / "cracks"
-    val fImgIn      = dirIn      / "two_bw" / s"cracks${crackIdx}_19bw.png"
+    val fImgInBW    = dirIn      / "two_bw"   / s"cracks${crackIdx}_19bw.png"
+    val fImgInGray  = dirIn      / "two_gray" / s"cracks${crackIdx}_19.jpg"
     val dirOut      = projectDir / "Maeanderungen" / "cracks"
     val fOutRaw     = dirOut     / s"cracks${crackIdx}_gng.bin"
     val fOutFuse    = dirOut     / s"cracks${crackIdx}_fuse.bin"
@@ -56,10 +57,10 @@ object Cracks {
         fun(f)
       }
 
-    withFileOut(fOutRaw  )(f => calcGNG  (fImg      = fImgIn                     , fOut = f))
-    withFileOut(fOutFuse )(f => calcFuse (fIn       = fOutRaw                    , fOut = f))
-    withFileOut(fOutPoles)(f => calcPoles(fGraphIn  = fOutFuse , fImgIn = fImgIn , fOut = f))
-    withFileOut(fOutAudio)(f => calcAudio(fPolesIn  = fOutPoles, fImgIn = fImgIn , fOut = f))
+    withFileOut(fOutRaw  )(f => calcGNG  (fImg      = fImgInBW                      , fOut = f))
+    withFileOut(fOutFuse )(f => calcFuse (fIn       = fOutRaw                       , fOut = f))
+    withFileOut(fOutPoles)(f => calcPoles(fGraphIn  = fOutFuse , fImgIn = fImgInBW  , fOut = f))
+    withFileOut(fOutAudio)(f => calcAudio(fPolesIn  = fOutPoles, fImgIn = fImgInGray, fOut = f))
   }
 
   /** Partition a graph into a list of disjoint graphs.
@@ -234,6 +235,9 @@ object Cracks {
           bufOff = 0
         }
 
+        var dcMem0 = 0f
+        var dcMem1 = 1f
+
         while (available() > 0) {
           val x1        = readFloat() * SCALE_DOWN
           val y1        = readFloat() * SCALE_DOWN
@@ -248,7 +252,7 @@ object Cracks {
           
           import numbers.Implicits._
           
-          for (step <- 0 until numSteps) {
+          val seq = for (step <- 0 until numSteps) yield {
             val xi: Float = step.linlin(0, numSteps, x1, x2)
             val yi: Float = step.linlin(0, numSteps, y1, y2)
             
@@ -267,10 +271,24 @@ object Cracks {
             val v4  = getValue(xk, yk) * xwk * ywk
             val v: Float = 1f - (v1 + v2 + v3 + v4)
 
-            buf0(bufOff) = v
-            bufOff += 1
-            if (bufOff == bufLen) flush()
+            v
+//            buf0(bufOff) = v
+//            bufOff += 1
+//            if (bufOff == bufLen) flush()
           }
+
+
+          import kollflitz.Ops._
+//          val x = seq.sum / seq.size
+          val x = seq.variance.sqrt
+          // dc-block: Y1 = X1-X0+Y0*gain
+          val y = x-dcMem0+dcMem1*0.99f
+          dcMem0 = x
+          dcMem1 = y
+
+          buf0(bufOff) = y
+          bufOff += 1
+          if (bufOff == bufLen) flush()
         }
 
         flush()
@@ -579,8 +597,6 @@ object Cracks {
     }
 
     println()
-
-    // dc-block: Y1 = X1-X0+Y0*gain
   }
 
   def intersectLineLine(a: LineFloat2D, b: LineFloat2D, eps: Float = 1.0e-6f): Option[Point2D] =
