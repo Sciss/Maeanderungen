@@ -60,7 +60,8 @@ object Cracks {
     withFileOut(fOutRaw  )(f => calcGNG  (fImg      = fImgInBW                      , fOut = f))
     withFileOut(fOutFuse )(f => calcFuse (fIn       = fOutRaw                       , fOut = f))
     withFileOut(fOutPoles)(f => calcPoles(fGraphIn  = fOutFuse , fImgIn = fImgInBW  , fOut = f))
-    withFileOut(fOutAudio)(f => calcAudio(fPolesIn  = fOutPoles, fImgIn = fImgInGray, fOut = f))
+//    withFileOut(fOutAudio)(f => calcAudio(fPolesIn  = fOutPoles, fImgIn = fImgInGray, fOut = f))
+    withFileOut(fOutAudio)(f => calcAudio(fPolesIn  = fOutPoles, fImgIn = fImgInBW  , fOut = f))
   }
 
   /** Partition a graph into a list of disjoint graphs.
@@ -451,15 +452,19 @@ object Cracks {
       val dx      = math.cos(ang).toFloat * safeLen
       val dy      = math.sin(ang).toFloat * safeLen
       val nodeLn  = new LineFloat2D(n.x - dx, n.y - dy, n.x + dx, n.y + dy)
-      // append to box, so we're sure we cut somewhere
-      val inter   = (polyIt ++ box.iterator).flatMap(intersectLineLine(_, nodeLn))
-      val pt1     = inter.next()
-      val pt2     = inter.next()
-      val res     = new LineFloat2D(pt1.x, pt1.y, pt2.x, pt2.y)
-      Some(res)
+      // append to box, so we're sure we cut somewhere -- NOT
+      val inter   = polyIt /* ++ box.iterator */ .flatMap(intersectLineLine(_, nodeLn))
+      if (inter.hasNext) {
+        val pt1   = inter.next()
+        if (inter.hasNext) {
+          val pt2 = inter.next()
+          val res = new LineFloat2D(pt1.x, pt1.y, pt2.x, pt2.y)
+          Some(res)
+        } else None
+      } else None
     }
 
-    val pixelStep = (1.0 / 8) / SCALE_DOWN
+    val pixelStep = (1.0 / 16) / SCALE_DOWN
     import math.Pi
     val PiH = Pi / 2
     val Pi2 = Pi * 2
@@ -599,13 +604,13 @@ object Cracks {
     println()
   }
 
-  def intersectLineLine(a: LineFloat2D, b: LineFloat2D, eps: Float = 1.0e-6f): Option[Point2D] =
+  def intersectLineLine(a: LineFloat2D, b: LineFloat2D, eps: Float = 1.0e-5f): Option[Point2D] =
     intersectLineLineF(
       a1x = a.x1, a1y = a.y1, a2x = a.x2, a2y = a.y2,
       b1x = b.x1, b1y = b.y1, b2x = b.x2, b2y = b.y2, eps = eps)
 
   def intersectLineLineF(a1x: Float, a1y: Float, a2x: Float, a2y: Float,
-                         b1x: Float, b1y: Float, b2x: Float, b2y: Float, eps: Float = 1.0e-6f): Option[Point2D] = {
+                         b1x: Float, b1y: Float, b2x: Float, b2y: Float, eps: Float = 1.0e-5f): Option[Point2D] = {
     val dax   = a2x - a1x
     val day   = a2y - a1y
     val dbx   = b2x - b1x
