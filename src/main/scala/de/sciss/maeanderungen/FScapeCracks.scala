@@ -55,7 +55,7 @@ object FScapeCracks {
       val scan0     = ScanImage(imgIn, width = imgWidth, height = imgHeight, x = x, y = y, zeroCrossings = 0)
       val scan      = -scan0 + (1.0: GE)
       val step0     = numStepsM.sqrt
-      val step      = WhiteNoise(64) + (512: GE) // (step0 + WhiteNoise(4)).max(1)
+      val step      = WhiteNoise(512) + (512: GE) // (step0 + WhiteNoise(4)).max(1)
       val lap       = OverlapAdd(scan, size = numStepsM, step = step)
       val hpf       = Biquad(lap, b0 = 1, b1 = -1, a1 = -0.99) // dc-block: y(n) = x(n) - x(n-1) + 0.99 * y(n-1)
       val max       = RunningMax(hpf).last
