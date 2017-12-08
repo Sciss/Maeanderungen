@@ -7,6 +7,7 @@ import de.sciss.file._
 import de.sciss.maeanderungen.Cracks.POLE_COOKIE
 import de.sciss.synth.io.{AudioFile, AudioFileSpec}
 
+// temporary program to convert old binary format files
 object BridgePolesBinToAudio {
   def main(args: Array[String]): Unit = {
     val fIn   = file("/data/projects/Maeanderungen/cracks/cracks2_poles.bin")
