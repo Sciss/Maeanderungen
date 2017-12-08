@@ -50,14 +50,18 @@ object FScapeCracks {
 //      Plot1D(x, size = 4000, "x")
 //      Plot1D(y, size = 4000, "y")
 
+      def dcBlock(in: GE): GE =
+        Biquad(in, b0 = 1, b1 = -1, a1 = -0.99) // dc-block: y(n) = x(n) - x(n-1) + 0.99 * y(n-1)
+
 //      val x         = RepeatWindow(x1.elastic(2), num = len) // XXX TODO
 //      val y         = RepeatWindow(y1.elastic(2), num = len) // XXX TODO
       val scan0     = ScanImage(imgIn, width = imgWidth, height = imgHeight, x = x, y = y, zeroCrossings = 0)
       val scan      = -scan0 + (1.0: GE)
       val step0     = numStepsM.sqrt
       val step      = WhiteNoise(512) + (512: GE) // (step0 + WhiteNoise(4)).max(1)
-      val lap       = OverlapAdd(scan, size = numStepsM, step = step)
-      val hpf       = Biquad(lap, b0 = 1, b1 = -1, a1 = -0.99) // dc-block: y(n) = x(n) - x(n-1) + 0.99 * y(n-1)
+      val scanHPF   = dcBlock(scan)
+      val lap       = OverlapAdd(scanHPF, size = numStepsM, step = step)
+      val hpf       = dcBlock(lap)
       val max       = RunningMax(hpf).last
       val disk      = BufferDisk(hpf)
       val sigOut    = disk / max
