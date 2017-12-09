@@ -38,8 +38,9 @@ object FScapeCracks {
       val dy        = y2 - y1
       val len       = (dx.squared + dy.squared).sqrt
       val pixelStep = 1.0 / audioBreadthStep
-      val numSteps1 = (len / pixelStep).floor
-      val numSteps  = numSteps1 + (1: GE)
+      val numSteps0 = (len / pixelStep).floor
+      val numSteps1 = numSteps0 + (1: GE) - (numSteps0 % 2) // odd
+      val numSteps  = numSteps1 + (1: GE) // even
 //      RepeatWindow(Frames(numSteps)).poll(2, "num-steps")
 
       val BUF = 44100
@@ -50,6 +51,10 @@ object FScapeCracks {
 //      Plot1D(x, size = 4000, "x")
 //      Plot1D(y, size = 4000, "y")
 
+      val STATIC_STEP = true // false
+      val DC_EARLY    = true
+      val USE_IFFT    = false
+
       def dcBlock(in: GE): GE =
         Biquad(in, b0 = 1, b1 = -1, a1 = -0.99) // dc-block: y(n) = x(n) - x(n-1) + 0.99 * y(n-1)
 
@@ -58,14 +63,32 @@ object FScapeCracks {
       val scan0     = ScanImage(imgIn, width = imgWidth, height = imgHeight, x = x, y = y, zeroCrossings = 0)
       val scan      = -scan0 + (1.0: GE)
       val step0     = numStepsM.sqrt
-      val step      = WhiteNoise(512) + (512: GE) // (step0 + WhiteNoise(4)).max(1)
-      val scanHPF   = dcBlock(scan)
-      val lap       = OverlapAdd(scanHPF, size = numStepsM, step = step)
+      val step      = if (STATIC_STEP)
+        WhiteNoise(512) + (512: GE)
+      else
+        (step0 + WhiteNoise(4)).max(1)
+
+      val scanHPF   = if (DC_EARLY) dcBlock(scan) else scan
+      val fftSize   = 1024 // BufferDisk(numStepsM)
+//      RepeatWindow(fftSize).poll(2, "fft-size")
+//      val fftSize   = 32768
+      val scanSpec0 = if (USE_IFFT) {
+//        Real1IFFT(scanHPF, size = fftSize, mode = 0)
+        DCT_II(BufferDisk(scanHPF), size = fftSize, numCoeffs = fftSize)
+      } else scanHPF
+//      val framesOut = Frames(scanSpec \ 0)
+//      ((framesOut - 1) / 44100).poll(44100, "spec [s]")
+      val scanSpec  = BufferDisk(scanSpec0)
+      val stepM     = BufferDisk(step)
+      val lap0      = OverlapAdd(scanSpec, size = numStepsM, step = stepM)
+      val lap       = lap0.take(44100 * 30)
       val hpf       = dcBlock(lap)
+      val framesOut = Frames(hpf \ 0)
+      ((framesOut - 1) / 44100).poll(44100, "spec [s]")
       val max       = RunningMax(hpf).last
       val disk      = BufferDisk(hpf)
       val sigOut    = disk / max
-      val framesOut = AudioFileOut(fAudioOut, AudioFileSpec(numChannels = numCh, sampleRate = 44100), in = sigOut)
+      /* val framesOut = */ AudioFileOut(fAudioOut, AudioFileSpec(numChannels = numCh, sampleRate = 44100), in = sigOut)
 //      ((framesOut - 1) / 44100).poll(44100, "out [s]")
 //      x.poll(1000, "x")
 //      y.poll(1000, "y")
