@@ -472,7 +472,7 @@ object Cracks {
 
     val safeLen = widthS + heightS  // for artificial line segments in mkPole to sect the box
 
-    def mkPole(nodeIdx: Int, ang: Double): Option[LineFloat2D] = {
+    def mkPole(nodeIdx: Int, ang: Double): Option[(Point2D, LineFloat2D)] = {
       val n       = nodes(nodeIdx)
       val pt      = Point2D(n.x, n.y)
 //      println(pt)
@@ -488,7 +488,8 @@ object Cracks {
         val pt1   = inter.next()
         if (inter.hasNext) {
           val pt2 = inter.next()
-          val res = new LineFloat2D(pt1.x, pt1.y, pt2.x, pt2.y)
+          val ln  = new LineFloat2D(pt1.x, pt1.y, pt2.x, pt2.y)
+          val res = (pt, ln)
           Some(res)
         } else None
       } else None
@@ -523,7 +524,7 @@ object Cracks {
 
 //    def debugDegree(d: Double): String = ((d.toDegrees + 360) % 360).roundTo(0.1).toFloat.toString
 
-    val poles0: Iterator[LineFloat2D] =
+    val poles0: Iterator[(Point2D, LineFloat2D)] =
       pathIt.flatMap { case ((Seq(ni1, ni2), Seq((l1, _a1), (l2, a2), (l3, _a3))), pathIdx) =>
         val n1        = nodes(ni1)
         val n2        = nodes(ni2)
@@ -584,38 +585,39 @@ object Cracks {
       }
 
     val fImgOut2 = tempDir / "test_poles.png"
-    val poles: Iterator[LineFloat2D] = if (fImgOut2.exists()) poles0 else new AbstractIterator[LineFloat2D] {
-      def hasNext: Boolean = poles0.hasNext
+    val poles: Iterator[(Point2D, LineFloat2D)] = if (fImgOut2.exists()) poles0 else
+      new AbstractIterator[(Point2D, LineFloat2D)] {
+        def hasNext: Boolean = poles0.hasNext
 
-      private lazy val imgTest  = new BufferedImage((xMax * 2).toInt + 1, (yMax * 2).toInt + 1, BufferedImage.TYPE_INT_ARGB)
-      private lazy val g        = {
-        val _g = imgTest.createGraphics()
-        _g.setColor(Color.black)
-        _g.fillRect(0, 0, imgTest.getWidth, imgTest.getHeight)
-        _g.setColor(Color.white)
-        _g.setRenderingHint(RenderingHints.KEY_ANTIALIASING  , RenderingHints.VALUE_ANTIALIAS_ON)
-        _g.setRenderingHint(RenderingHints.KEY_STROKE_CONTROL, RenderingHints.VALUE_STROKE_PURE )
-        _g
-      }
-      private val ln = new Line2D.Float
-
-      def drawLine(l: LineFloat2D): Unit = {
-        ln.setLine(l.x1 * 2, l.y1 * 2, l.x2 * 2, l.y2 * 2)
-        g.draw(ln)
-      }
-
-      def next(): LineFloat2D = {
-        val res = poles0.next()
-        drawLine(res)
-        if (!hasNext) {
-          g.dispose()
-          ImageIO.write(imgTest, "png", fImgOut2)
+        private lazy val imgTest  = new BufferedImage((xMax * 2).toInt + 1, (yMax * 2).toInt + 1, BufferedImage.TYPE_INT_ARGB)
+        private lazy val g        = {
+          val _g = imgTest.createGraphics()
+          _g.setColor(Color.black)
+          _g.fillRect(0, 0, imgTest.getWidth, imgTest.getHeight)
+          _g.setColor(Color.white)
+          _g.setRenderingHint(RenderingHints.KEY_ANTIALIASING  , RenderingHints.VALUE_ANTIALIAS_ON)
+          _g.setRenderingHint(RenderingHints.KEY_STROKE_CONTROL, RenderingHints.VALUE_STROKE_PURE )
+          _g
         }
-        res
-      }
-    }
+        private val ln = new Line2D.Float
 
-    val afOut = AudioFile.openWrite(fOut, AudioFileSpec(numChannels = 4, sampleRate = 44100))
+        def drawLine(l: LineFloat2D): Unit = {
+          ln.setLine(l.x1 * 2, l.y1 * 2, l.x2 * 2, l.y2 * 2)
+          g.draw(ln)
+        }
+
+        def next(): (Point2D, LineFloat2D) = {
+          val res = poles0.next()
+          drawLine(res._2)
+          if (!hasNext) {
+            g.dispose()
+            ImageIO.write(imgTest, "png", fImgOut2)
+          }
+          res
+        }
+      }
+
+    val afOut = AudioFile.openWrite(fOut, AudioFileSpec(numChannels = 6, sampleRate = 44100))
     try {
       val bufLen  = 1024
       val buf     = afOut.buffer(bufLen)
@@ -626,11 +628,13 @@ object Cracks {
         bufOff = 0
       }
 
-      poles.foreach { ln =>
-        buf(0)(bufOff) = ln.x1
-        buf(1)(bufOff) = ln.y1
-        buf(2)(bufOff) = ln.x2
-        buf(3)(bufOff) = ln.y2
+      poles.foreach { case (pt, ln) =>
+        buf(0)(bufOff) = pt.x
+        buf(1)(bufOff) = pt.y
+        buf(2)(bufOff) = ln.x1
+        buf(3)(bufOff) = ln.y1
+        buf(4)(bufOff) = ln.x2
+        buf(5)(bufOff) = ln.y2
         bufOff += 1
         if (bufOff == bufLen) flush()
       }
