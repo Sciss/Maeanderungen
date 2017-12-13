@@ -17,7 +17,7 @@ libraryDependencies ++= Seq(
   "de.sciss"          %% "topology"        % "1.1.0",
   "de.sciss"          %% "scalaaudiofile"  % "1.4.6",
   "de.sciss"          %% "fscape-core"     % "2.11.1-SNAPSHOT",
-  "de.sciss"          %% "travelling-ants" % "0.1.0",
+  "de.sciss"          %% "travelling-ants" % "0.1.1",
   "com.github.scopt"  %% "scopt"           % "3.7.0"
 )
 

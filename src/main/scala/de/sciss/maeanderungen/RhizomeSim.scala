@@ -15,10 +15,10 @@ package de.sciss.maeanderungen
 
 import java.io.{DataInputStream, DataOutputStream, FileInputStream, FileOutputStream}
 
+import de.sciss.ants.{Ant, Colony, ConnectedGraph}
 import de.sciss.file._
 import de.sciss.fscape.Graph
 import de.sciss.fscape.stream.Control
-import de.sciss.numbers
 import de.sciss.synth.io.{AudioFile, AudioFileSpec}
 
 import scala.collection.mutable
@@ -30,25 +30,66 @@ object RhizomeSim {
 
   final case class Vertex(fIn: File) {
     def quote: String = fIn.name
+
+    def extractNum: Int = {
+      val n = fIn.name
+      val i = n.indexOf('-') + 1
+      val j = n.indexOf('-', i)
+      n.substring(i, j).toInt
+    }
   }
 
   val projectDir: File  = file("/data/projects/Maeanderungen")
   val rhizomeDir: File  = projectDir / "materials" / "audio_work" / "rhizom"
 
   def main(args: Array[String]): Unit = {
-    val filesIn     = rhizomeDir.children(f => f.name.endsWith("-1.aif")).sorted(File.NameOrdering)
-    val vertices    = filesIn.map(Vertex).toList
-    val fOut        = rhizomeDir / "rhizome-edges.bin"
-    val edges       = if (fOut.exists()) {
+    val filesIn  = rhizomeDir.children(f => f.name.endsWith("-1.aif")).sorted(File.NameOrdering)
+    val vertices = filesIn.map(Vertex).toList
+    val fOut     = rhizomeDir / "rhizome-edges.bin"
+    val edges    = if (fOut.exists()) {
       println(s"File $fOut already exists. Not overwriting.")
       readGraph(fOut)
     } else {
       val fut = calcSim(vertices, fOut = fOut)
       Await.result(fut, Duration.Inf)
     }
+    calcPath(edges)
   }
 
   case class SimEdge(sourceVertex: Vertex, targetVertex: Vertex, weight: Double)
+
+  def calcPath(edges: List[SimEdge]): Unit = {
+    val edgeMap = edges.map {
+      case SimEdge(v1, v2, w) =>
+        (v1, v2) -> w
+    } .toMap
+
+    val vertexSet: Set[Vertex] = edgeMap.keySet.flatMap { case (a, b) => List(a,b) }
+    val vertexSeq = vertexSet.toSeq
+
+    val ant   : Ant   [Vertex]  = new Ant
+    val colony: Colony[Vertex]  = new Colony(ant)
+    val graph     = ConnectedGraph(vertexSeq) { (a, b) =>
+      edgeMap.getOrElse((a, b), edgeMap((b, a)))
+    }
+    val numIter   = 20000
+    var lastProg  = 0
+    println("_" * 60)
+
+    import scala.concurrent.ExecutionContext.Implicits.global
+
+    val fut = colony.solve(graph, iterations = numIter, { p =>
+      val prog = (p.iterationCount * 60) / numIter
+      while (lastProg < prog) {
+        print('#')
+        lastProg += 1
+      }
+    })
+    val solution = Await.result(fut, Duration.Inf)
+
+    println(s"\nDone. Cost: ${solution.cost}")
+    println(solution.steps.map(_._1.extractNum).mkString("Sequence:\n  ", "\n  ", ""))
+  }
 
   def readGraph(fIn: File): List[SimEdge] = {
     val sIn = new FileInputStream(fIn)
@@ -77,8 +118,9 @@ object RhizomeSim {
     val minSim = in.iterator.map(_.weight).min
     val maxSim = in.iterator.map(_.weight).max
     println(f"minSim = $minSim%g, maxSim = $maxSim%g")
-    import numbers.Implicits._
-    val edges = in.map(e => e.copy(weight = e.weight.linlin(minSim, maxSim, 1.0, 0.0)))
+//    import numbers.Implicits._
+    // N.B. For ant-colony, no distance must be <= 0!
+    val edges = in.map(e => e.copy(weight = 1.0 / e.weight /* .linlin(minSim, maxSim, 1.0, 0.0) */))
     edges
   }
 
