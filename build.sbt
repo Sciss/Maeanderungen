@@ -1,5 +1,5 @@
 name         := "Maeanderungen"
-version      := "0.1.0"
+version      := "0.2.0-SNAPSHOT"
 description  := "An algorithmic art project"
 organization := "de.sciss"
 homepage     := Some(url(s"https://github.com/Sciss/${name.value}"))
@@ -11,12 +11,12 @@ scalacOptions ++= Seq("-deprecation", "-unchecked", "-feature", "-Xfuture", "-en
 libraryDependencies ++= Seq(
   "de.sciss"          %  "neuralgas-core"  % "2.3.1",
   "de.sciss"          %% "fileutil"        % "1.1.3",
-  "de.sciss"          %% "numbers"         % "0.1.3",
+  "de.sciss"          %% "numbers"         % "0.1.5",
   "de.sciss"          %% "kollflitz"       % "0.2.1",
   "de.sciss"          %% "equal"           % "0.1.2",
   "de.sciss"          %% "topology"        % "1.1.0",
   "de.sciss"          %% "scalaaudiofile"  % "1.4.6",
-  "de.sciss"          %% "fscape-core"     % "2.11.1",
+  "de.sciss"          %% "fscape-core"     % "2.12.0",
   "de.sciss"          %% "travelling-ants" % "0.1.1",
   "com.github.scopt"  %% "scopt"           % "3.7.0"
 )

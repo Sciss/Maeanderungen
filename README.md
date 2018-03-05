@@ -4,7 +4,7 @@
 
 ## statement
 
-Software for sound experiments. (C)opyright 2017 by Hanns Holger Rutz. All rights reserved. This project is released under the
+Software for sound experiments. (C)opyright 2017&ndash;2018 by Hanns Holger Rutz. All rights reserved. This project is released under the
 [GNU General Public License](http://github.com/Sciss/ImperfectHough/blob/master/LICENSE) v2+ and comes with absolutely no warranties.
 To contact the author, send an email to `contact at sciss.de`.
 
@@ -14,7 +14,7 @@ Builds with sbt against Scala 2.12.
 
 ## context
 
-This project was used in our preliminary radio experiment __Raumaneignungen__ (Nayari Castillo, 
+This project was first used in our preliminary radio experiment __Raumaneignungen__ (Nayari Castillo, 
 Reni Hofmüller, Miriam Raggam, Hanns Holger Rutz). In 2018, we plan to create a radio piece
 _generator_, and the code for this will likely be found in this repository as well.
 For 'Raumaneignungen', it contains code to translate photographs of cracks in the pavement
@@ -23,3 +23,8 @@ distribute whispered text fragments.
 
 'Raumaneignungen' was part of the Urban Challenges series, and it will eventually be available
 from [this archive](https://cba.fro.at/series/urban-challenges).
+
+The repository is now used as a basis for developing the _Mäanderungen_ radio project.
+_Mäanderungen_ is a project by Nayarí Castillo, Reni Hofmüller, Hanns Holger Rutz, and Miriam Raggam.
+It won the 3rd lime\_lab prize - laboratory for the development of experimental media and 
+boundary crossing radio play - awarded by the Federal Chancellery of Austria (BKA).

@@ -2,7 +2,7 @@
  *  Cracks.scala
  *  (Mäanderungen)
  *
- *  Copyright (c) 2017 Hanns Holger Rutz. All rights reserved.
+ *  Copyright (c) 2017-2018 Hanns Holger Rutz. All rights reserved.
  *
  *  This software is published under the GNU General Public License v2+
  *
@@ -162,7 +162,7 @@ object Cracks {
 
     val dirIn       = projectDir / "Imperfect" / "cracks"
     val fImgInBW    = dirIn      / "two_bw"   / s"cracks${crackIdx}_${crackId}bw.png"
-    val fImgInGray  = dirIn      / "two_gray" / s"cracks${crackIdx}_${crackId}.jpg"
+//    val fImgInGray  = dirIn      / "two_gray" / s"cracks${crackIdx}_${crackId}.jpg"
     val dirOut      = projectDir / "Maeanderungen" / "cracks"
 
     dirOut.mkdirs()
