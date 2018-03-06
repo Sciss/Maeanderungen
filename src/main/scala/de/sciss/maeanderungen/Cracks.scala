@@ -155,14 +155,26 @@ object Cracks {
     p.parse(args, default).fold(sys.exit(1)){ implicit config => run() }
   }
 
+  def mkFImgIn(projectDir: File, crackId: Int, blackAndWhite: Boolean): File = {
+    val dirIn       = projectDir / "Imperfect" / "cracks"
+    val crackIdx    = 2
+    val fImgInBW    = dirIn      / "two_bw"   / s"cracks${crackIdx}_${crackId}bw.png"
+    val fImgInGray  = dirIn      / "two_gray" / s"cracks${crackIdx}_${crackId}.jpg"
+    val fImgIn      = if (blackAndWhite) fImgInBW else fImgInGray
+    fImgIn
+  }
+
   def run()(implicit config: Config): Unit = {
     import config._
     val crackIdx    = 2
     require(projectDir.isDirectory)
 
-    val dirIn       = projectDir / "Imperfect" / "cracks"
-    val fImgInBW    = dirIn      / "two_bw"   / s"cracks${crackIdx}_${crackId}bw.png"
-//    val fImgInGray  = dirIn      / "two_gray" / s"cracks${crackIdx}_${crackId}.jpg"
+    val fImgIn1     = {
+      val dirIn       = projectDir / "Imperfect" / "cracks"
+      val fImgInBW    = dirIn      / "two_bw"   / s"cracks${crackIdx}_${crackId}bw.png"
+      val fImgInGray  = dirIn      / "two_gray" / s"cracks${crackIdx}_${crackId}.jpg"
+      if (blackAndWhite) fImgInBW else fImgInGray
+    }
     val dirOut      = projectDir / "Maeanderungen" / "cracks"
 
     dirOut.mkdirs()
@@ -179,9 +191,9 @@ object Cracks {
         fun(f)
       }
 
-    withFileOut(fOutRaw  )(f => calcGNG  (fImg      = fImgInBW                      , fOut = f))
-    withFileOut(fOutFuse )(f => calcFuse (fIn       = fOutRaw                       , fOut = f))
-    withFileOut(fOutPoles)(f => calcPoles(fGraphIn  = fOutFuse , fImgIn = fImgInBW  , fOut = f))
+    withFileOut(fOutRaw  )(f => calcGNG  (fImg      = fImgIn1                        , fOut = f))
+    withFileOut(fOutFuse )(f => calcFuse (fIn       = fOutRaw                        , fOut = f))
+    withFileOut(fOutPoles)(f => calcPoles(fGraphIn  = fOutFuse , fImgIn = fImgIn1    , fOut = f))
 //    withFileOut(fOutAudio)(f => calcAudio(fPolesIn  = fOutPoles, fImgIn = fImgInGray, fOut = f))
 //    withFileOut(fOutAudio)(f => calcAudio(fPolesIn  = fOutPoles, fImgIn = if (blackAndWhite) fImgInBW else fImgInGray, fOut = f))
   }
@@ -282,7 +294,7 @@ object Cracks {
       by inserting edges between disconnected graph
     - read the neural gas graph
    */
-  def calcFuse(fIn: File, fOut: File)(implicit config: Config): Unit = {
+  def calcFuse(fIn: File, fOut: File)/* (implicit config: Config) */: Unit = {
     requireCanWrite(fOut)
     val compute = readGraph(fIn)
 
