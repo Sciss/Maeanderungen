@@ -18,12 +18,12 @@ import javax.imageio.ImageIO
 
 import de.sciss.equal.Implicits._
 import de.sciss.file.File
-import de.sciss.maeanderungen.Cracks.{Config, POLE_COOKIE, requireCanWrite}
+import de.sciss.maeanderungen.CracksAnalysis.{Config, POLE_COOKIE, requireCanWrite}
 import de.sciss.{kollflitz, numbers}
 import de.sciss.synth.io.{AudioFile, AudioFileSpec}
 
 object Old {
-  def calcAudio(fPolesIn: File, fImgIn: File, fOut: File)(implicit config: Config): Unit = {
+  def calcAudio(fPolesIn: File, fImgIn: File, fOut: File, audioBreadthStep: Int = 2)(implicit config: Config): Unit = {
     import config._
 
     requireCanWrite(fOut)

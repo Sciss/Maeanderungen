@@ -17,7 +17,7 @@ import java.io.{DataInputStream, FileInputStream}
 
 import de.sciss.equal.Implicits._
 import de.sciss.file._
-import de.sciss.maeanderungen.Cracks.POLE_COOKIE
+import de.sciss.maeanderungen.CracksAnalysis.POLE_COOKIE
 import de.sciss.synth.io.{AudioFile, AudioFileSpec}
 
 // temporary program to convert old binary format files

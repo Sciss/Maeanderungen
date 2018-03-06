@@ -1,5 +1,5 @@
 /*
- *  Cracks.scala
+ *  CracksAnalysis.scala
  *  (Mäanderungen)
  *
  *  Copyright (c) 2017-2018 Hanns Holger Rutz. All rights reserved.
@@ -21,19 +21,17 @@ import javax.imageio.ImageIO
 
 import de.sciss.equal.Implicits._
 import de.sciss.file._
-import de.sciss.kollflitz
-import de.sciss.numbers
 import de.sciss.neuralgas.ComputeGNG.Result
 import de.sciss.neuralgas.{Algorithm, ComputeGNG, EdgeGNG, ImagePD, LineFloat2D, NodeGNG, PointFloat2D}
+import de.sciss.{kollflitz, numbers}
 import de.sciss.synth.io.{AudioFile, AudioFileSpec}
 import de.sciss.topology.Graph.EdgeMap
 import de.sciss.topology.{EdgeView, Graph, Kruskal}
 
 import scala.annotation.tailrec
 import scala.collection.{AbstractIterator, breakOut}
-import scala.util.Try
 
-object Cracks {
+object CracksAnalysis {
   final val GRAPH_COOKIE  = 0x474E4755 // 'GNGU'
   final val POLE_COOKIE   = 0x506F6C65 // 'Pole'
 
@@ -52,21 +50,23 @@ object Cracks {
     final val name: String = productPrefix.toLowerCase
   }
 
-  final case class Config(crackId         : Int         = 19,
-                          blackAndWhite   : Boolean     = true,
-                          startNode       : Int         = -1,
-                          endNode         : Int         = -1,
-                          gngBeta         : Float       = 5.0e-6f,
-                          gngUtility      : Float       = 17f,
-                          rndSeed         : Long        = 0L,
-                          imgScaleDown    : Int         = 8,
-                          maxNodesDown    : Int         = 10,
-                          poleStep        : Int         = 16,
-                          audioBreadthStep: Int         = 2,
-                          audioTimePower  : Float       = 0.5f,
-                          decimation      : Decimation  = Decimation.None,
-                          projectDir      : File        = defaultProjectDir,
-                          tempDir         : File        = defaultTempDir
+  final case class Config(crackId         : Int           = 19,
+                          blackAndWhite   : Boolean       = true,
+                          startNode       : Int           = -1,
+                          endNode         : Int           = -1,
+                          gngBeta         : Float         = 5.0e-6f,
+                          gngUtility      : Float         = 17f,
+                          rndSeed         : Long          = 0L,
+                          imgScaleDown    : Int           = 8,
+                          maxNodesDown    : Int           = 10,
+                          maxNodesAbs     : Int           = 65536,
+                          poleStep        : Int           = 16,
+//                          audioBreadthStep: Int           = 2,
+//                          audioTimePower  : Float         = 0.5f,
+//                          decimation      : Decimation    = Decimation.None,
+                          imageInF        : Option[File]  = None,
+                          projectDir      : File          = defaultProjectDir,
+                          tempDir         : File          = defaultTempDir
                          )
 
   def defaultProjectDir: File = {
@@ -84,7 +84,7 @@ object Cracks {
   def main(args: Array[String]): Unit = {
     val default = Config()
 
-    val p = new scopt.OptionParser[Config]("Cracks") {
+    val p = new scopt.OptionParser[Config]("CracksAnalysis") {
       opt[Int] ("crack")
         .text (s"Crack image id (1 to 19; default: ${default.crackId})")
         .action { (v, c) => c.copy(crackId = v) }
@@ -101,58 +101,67 @@ object Cracks {
         .text (s"End node id of path traversal (-1 for last; default: ${default.endNode})")
         .action { (v, c) => c.copy(endNode = v) }
 
-      opt[Double] ("gng-utility")
+      opt[Double] ('u', "gng-utility")
         .text (s"GNG utility parameter (default: ${default.gngUtility})")
         .action { (v, c) => c.copy(gngUtility = v.toFloat) }
 
-      opt[Double] ("gng-beta")
-        .text (s"GNG betga parameter (default: ${default.gngBeta})")
+      opt[Double] ('b', "gng-beta")
+        .text (s"GNG beta parameter (default: ${default.gngBeta})")
         .action { (v, c) => c.copy(gngBeta = v.toFloat) }
 
-      opt[Long] ("random-seed")
+      opt[Long] ('r', "random-seed")
         .text (s"Seed value for RNG (default: ${default.rndSeed})")
         .action { (v, c) => c.copy(rndSeed = v) }
 
-      opt[Int] ("image-scale")
+      opt[Int] ('s', "image-scale")
         .text (s"Image scale-down factor (default: ${default.imgScaleDown})")
         .validate (v => if (v >= 1) success else failure("Must be >= 1"))
         .action { (v, c) => c.copy(imgScaleDown = v) }
 
-      opt[Int] ("nodes-scale")
+      opt[Int] ('n', "nodes-scale")
         .text (s"Number of nodes scale-down factor from black pixels (default: ${default.maxNodesDown})")
         .validate (v => if (v >= 1) success else failure("Must be >= 1"))
         .action { (v, c) => c.copy(maxNodesDown = v) }
 
-      opt[Int] ("pole-step")
+      opt[Int] ('x', "max-nodes")
+        .text (s"Maximum number of nodes (default: ${default.maxNodesAbs})")
+        .validate (v => if (v >= 2) success else failure("Must be >= 2"))
+        .action { (v, c) => c.copy(maxNodesAbs = v) }
+
+      opt[Int] ('p', "pole-step")
         .text (s"Pole tracing pixel decimation factor (default: ${default.poleStep})")
         .validate (v => if (v >= 1) success else failure("Must be >= 1"))
         .action { (v, c) => c.copy(poleStep = v) }
 
-      opt[Int] ("audio-breadth")
-        .text (s"Pole-to-audio breadth pixel decimation factor (default: ${default.audioBreadthStep})")
-        .validate (v => if (v >= 1) success else failure("Must be >= 1"))
-        .action { (v, c) => c.copy(audioBreadthStep = v) }
+//      opt[Int] ('w', "audio-breadth")
+//        .text (s"Pole-to-audio breadth pixel decimation factor (default: ${default.audioBreadthStep})")
+//        .validate (v => if (v >= 1) success else failure("Must be >= 1"))
+//        .action { (v, c) => c.copy(audioBreadthStep = v) }
+//
+//      opt[Double] ('a', "audio-time")
+//        .text (s"Audio scan time step exponent (default: ${default.audioTimePower})")
+//        .validate (v => if (v > 0 && v <= 1) success else failure("Must be > 0 and <= 1"))
+//        .action { (v, c) => c.copy(audioTimePower = v.toFloat) }
+//
+//      opt[String] ('m', "decimation")
+//        .text (s"Type of audio decimation (one of ${Decimation.names.mkString(", ")}; default: ${default.decimation.name})")
+//        .validate (v => Try(Decimation(v))
+//          .fold(_ => failure(s"one of ${Decimation.names.mkString(", ")}"), _ => success))
+//        .action { (v, c) => c.copy(decimation = Decimation(v)) }
 
-      opt[Double] ("audio-time")
-        .text (s"Audio scan time step exponent (default: ${default.audioTimePower})")
-        .validate (v => if (v > 0 && v <= 1) success else failure("Must be > 0 and <= 1"))
-        .action { (v, c) => c.copy(audioTimePower = v.toFloat) }
+      opt[File] ('i', "image")
+        .text (s"Image input (when set, replaces --crack and --bw)")
+        .action { (v, c) => c.copy(imageInF = Some(v)) }
 
-      opt[String] ("decimation")
-        .text (s"Type of audio decimation (one of ${Decimation.names.mkString(", ")}; default: ${default.decimation.name})")
-        .validate (v => Try(Decimation(v))
-          .fold(_ => failure(s"one of ${Decimation.names.mkString(", ")}"), _ => success))
-        .action { (v, c) => c.copy(decimation = Decimation(v)) }
-
-      opt[File] ("project-dir")
+      opt[File] ('d', "project-dir")
         .text (s"Projects based directory (default: ${default.projectDir})")
         .action { (v, c) => c.copy(projectDir = v) }
 
-      opt[File] ("temp-dir")
+      opt[File] ('t', "temp-dir")
         .text (s"Directory for temporary files and illustrations (default: ${default.tempDir})")
         .action { (v, c) => c.copy(tempDir = v) }
     }
-    p.parse(args, default).fold(sys.exit(1)){ implicit config => run() }
+    p.parse(args, default).fold(sys.exit(1)) { implicit config => run() }
   }
 
   def mkFImgIn(projectDir: File, crackId: Int, blackAndWhite: Boolean): File = {
@@ -169,7 +178,7 @@ object Cracks {
     val crackIdx    = 2
     require(projectDir.isDirectory)
 
-    val fImgIn1     = {
+    val fImgIn1     = imageInF.getOrElse {
       val dirIn       = projectDir / "Imperfect" / "cracks"
       val fImgInBW    = dirIn      / "two_bw"   / s"cracks${crackIdx}_${crackId}bw.png"
       val fImgInGray  = dirIn      / "two_gray" / s"cracks${crackIdx}_${crackId}.jpg"
@@ -179,9 +188,11 @@ object Cracks {
 
     dirOut.mkdirs()
 
-    val fOutRaw     = dirOut     / s"cracks${crackIdx}_gng.bin"
-    val fOutFuse    = dirOut     / s"cracks${crackIdx}_fuse.bin"
-    val fOutPoles   = dirOut     / s"cracks${crackIdx}_poles_${startNode}_${endNode}.aif"
+    val outPrefix   = imageInF.fold(s"cracks${crackIdx}")(_.base)
+
+    val fOutRaw     = dirOut     / s"${outPrefix}_gng.bin"
+    val fOutFuse    = dirOut     / s"${outPrefix}_fuse.bin"
+    val fOutPoles   = dirOut     / s"${outPrefix}_poles_${startNode}_${endNode}.aif"
 //    val fOutAudio   = dirOut     / s"cracks${crackIdx}_out_${startNode}_${endNode}.aif"
 
     def withFileOut(f: File)(fun: File => Unit): Unit =
@@ -758,7 +769,7 @@ object Cracks {
     compute.pd              = pd
     compute.panelWidth      = img.getWidth  / imgScaleDown
     compute.panelHeight     = img.getHeight / imgScaleDown
-    compute.maxNodes        = pd.getNumDots / maxNodesDown
+    compute.maxNodes        = math.min(maxNodesAbs, pd.getNumDots / maxNodesDown)
     compute.stepSize        = 400
     compute.algorithm       = Algorithm.GNGU
     compute.lambdaGNG       = 400
