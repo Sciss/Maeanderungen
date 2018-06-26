@@ -132,12 +132,12 @@ object CracksSynthesis {
 
     val g = Graph {
       import graph._
-      val poles     = AudioFileIn(polesInF, numChannels = 4)
-      val imgIn     = ImageFileIn(imageInF  , numChannels = imgCh)
-      val x1        = poles \ 0
-      val y1        = poles \ 1
-      val x2        = poles \ 2
-      val y2        = poles \ 3
+      val poles     = AudioFileIn(polesInF, numChannels = 6)
+      val imgIn     = ImageFileIn(imageInF, numChannels = imgCh)
+      val x1        = poles \ 2
+      val y1        = poles \ 3
+      val x2        = poles \ 4
+      val y2        = poles \ 5
       val dx        = x2 - x1
       val dy        = y2 - y1
       val len       = (dx.squared + dy.squared).sqrt
