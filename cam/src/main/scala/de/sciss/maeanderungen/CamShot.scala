@@ -3,7 +3,7 @@ package de.sciss.maeanderungen
 import java.util.Locale
 
 import com.hopding.jrpicam.RPiCamera
-import com.hopding.jrpicam.enums.{AWB, DRC, Encoding, Exposure => PiExposure, MeteringMode}
+import com.hopding.jrpicam.enums.{AWB, DRC, Encoding, MeteringMode, Exposure => PiExposure}
 import de.sciss.file._
 import scopt.OptionParser
 

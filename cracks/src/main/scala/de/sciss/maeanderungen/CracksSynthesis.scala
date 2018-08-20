@@ -123,10 +123,10 @@ object CracksSynthesis {
       import graph._
       val poles     = AudioFileIn(polesInF, numChannels = 6)
       val imgIn     = ImageFileIn(imageInF, numChannels = imgCh)
-      val x1        = poles \ 2
-      val y1        = poles \ 3
-      val x2        = poles \ 4
-      val y2        = poles \ 5
+      val x1        = poles out 2
+      val y1        = poles out 3
+      val x2        = poles out 4
+      val y2        = poles out 5
       val dx        = x2 - x1
       val dy        = y2 - y1
       val len       = (dx.squared + dy.squared).sqrt
@@ -176,12 +176,12 @@ object CracksSynthesis {
       val lap0      = OverlapAdd(scanSpec, size = numStepsM, step = stepM)
       val lap       = lap0.take((sampleRate * maxDur).toLong)
       val hpf       = dcBlock(lap)
-      val framesOut = Frames(hpf \ 0)
+      val framesOut = Frames(hpf out 0)
       ((framesOut - 1) / sampleRate).poll(sampleRate, "spec [s]")
       val max       = RunningMax(hpf).last
       val disk      = BufferDisk(hpf)
       val sigOut    = disk / max
-      /* val framesOut = */ AudioFileOut(audioOutF, AudioFileSpec(numChannels = imgCh, sampleRate = sampleRate), in = sigOut)
+      /* val framesOut = */ AudioFileOut(file = audioOutF, spec = AudioFileSpec(numChannels = imgCh, sampleRate = sampleRate), in = sigOut)
 //      ((framesOut - 1) / 44100).poll(44100, "out [s]")
 //      x.poll(1000, "x")
 //      y.poll(1000, "y")

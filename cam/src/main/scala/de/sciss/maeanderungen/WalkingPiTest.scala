@@ -88,7 +88,7 @@ object WalkingPiTest {
 
       val indicesOut  = ArithmSeq(start = 1, length = numFrames)
       val specOut     = ImageFile.Spec(width = wOut, height = hOut, numChannels = 3)
-      ImageFileSeqOut(tempOutF, specOut, indices = indicesOut, in = rot)
+      ImageFileSeqOut(template = tempOutF, spec = specOut, indices = indicesOut, in = rot)
 
 //      def i           = ArithmSeq(0, length = numFrames)
 //      val tx          = i % numCols
