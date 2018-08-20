@@ -3,9 +3,9 @@ package de.sciss.maeanderungen
 import java.awt.Color
 import java.awt.image.BufferedImage
 
-import de.sciss.fscape.{Graph, graph, stream}
 import de.sciss.file._
 import de.sciss.fscape.gui.SimpleGUI
+import de.sciss.fscape.{Graph, graph, stream}
 import javax.imageio.ImageIO
 
 import scala.swing.Swing

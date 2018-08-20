@@ -1,26 +1,13 @@
-/*
- *  Old.scala
- *  (Mäanderungen)
- *
- *  Copyright (c) 2017-2018 Hanns Holger Rutz. All rights reserved.
- *
- *  This software is published under the GNU General Public License v2+
- *
- *
- *  For further information, please contact Hanns Holger Rutz at
- *  contact@sciss.de
- */
-
 package de.sciss.maeanderungen
 
 import java.io.{DataInputStream, FileInputStream}
-import javax.imageio.ImageIO
 
 import de.sciss.equal.Implicits._
-import de.sciss.file.File
+import de.sciss.file._
 import de.sciss.maeanderungen.CracksAnalysis.{Config, POLE_COOKIE, requireCanWrite}
-import de.sciss.{kollflitz, numbers}
 import de.sciss.synth.io.{AudioFile, AudioFileSpec}
+import de.sciss.{kollflitz, numbers}
+import javax.imageio.ImageIO
 
 object Old {
   def calcAudio(fPolesIn: File, fImgIn: File, fOut: File, audioBreadthStep: Int = 2)(implicit config: Config): Unit = {
@@ -77,8 +64,8 @@ object Old {
           import numbers.Implicits._
 
           val seq = for (step <- 0 until numSteps) yield {
-            val xi: Float = step.linlin(0, numSteps, x1, x2)
-            val yi: Float = step.linlin(0, numSteps, y1, y2)
+            val xi: Float = step.linLin(0, numSteps, x1, x2)
+            val yi: Float = step.linLin(0, numSteps, y1, y2)
 
             val xj  = xi.toInt.clip(0, xMax)
             val xk  = (xj + 1).min(xMax)

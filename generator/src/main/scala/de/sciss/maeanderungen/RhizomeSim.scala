@@ -1,16 +1,3 @@
-/*
- *  RhizomSim.scala
- *  (Mäanderungen)
- *
- *  Copyright (c) 2017-2018 Hanns Holger Rutz. All rights reserved.
- *
- *  This software is published under the GNU General Public License v2+
- *
- *
- *  For further information, please contact Hanns Holger Rutz at
- *  contact@sciss.de
- */
-
 package de.sciss.maeanderungen
 
 import java.io.{DataInputStream, DataOutputStream, FileInputStream, FileOutputStream}
@@ -195,7 +182,7 @@ object RhizomeSim {
       val spec   = AudioFile.readSpec(inFile)
 
       def in0  = AudioFileIn(inFile, numChannels = spec.numChannels)
-      def mkIn = if (spec.numChannels == 1) in0 else (in0\0) + (in0\1)
+      def mkIn = if (spec.numChannels == 1) in0 else in0.out(0) + in0.out(1)
 
       def mkEnergy(in: GE): GE = {
         val mx  = RunningSum(in.squared).last
@@ -216,7 +203,7 @@ object RhizomeSim {
       val mfcc  = mkMFCC  (mkIn)
       val e     = mkEnergy(mkIn)
       val sig   = e ++ mfcc
-      AudioFileOut(outFile, AudioFileSpec(numChannels = 1, sampleRate = 44100), in = sig)
+      AudioFileOut(file = outFile, spec = AudioFileSpec(numChannels = 1, sampleRate = 44100), in = sig)
     }
     g
   }

@@ -1,31 +1,20 @@
-/*
- *  CracksSynthesis.scala
- *  (Mäanderungen)
- *
- *  Copyright (c) 2017-2018 Hanns Holger Rutz. All rights reserved.
- *
- *  This software is published under the GNU General Public License v2+
- *
- *
- *  For further information, please contact Hanns Holger Rutz at
- *  contact@sciss.de
- */
-
 package de.sciss.maeanderungen
 
 import java.awt.image.DataBuffer
 import java.util.Locale
-import javax.imageio.ImageIO
 
-import de.sciss.fscape.{GE, Graph, graph, stream}
 import de.sciss.file._
 import de.sciss.fscape.graph.ImageFile
 import de.sciss.fscape.gui.SimpleGUI
+import de.sciss.fscape.{GE, Graph, graph, stream}
 import de.sciss.synth.io.{AudioFile, AudioFileSpec}
+import javax.imageio.ImageIO
 
 import scala.swing.Swing
 
 object CracksSynthesis {
+  def any2stringadd: Nothing = sys.error("no way")
+
   final case class Config(
                          imageInF         : File    = file("image.jpg"),
                          polesInF         : File    = file("poles.aif"),

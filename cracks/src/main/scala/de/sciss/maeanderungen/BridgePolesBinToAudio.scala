@@ -1,24 +1,11 @@
-/*
- *  BridgePolesBinToAudio.scala
- *  (Mäanderungen)
- *
- *  Copyright (c) 2017-2018 Hanns Holger Rutz. All rights reserved.
- *
- *  This software is published under the GNU General Public License v2+
- *
- *
- *  For further information, please contact Hanns Holger Rutz at
- *  contact@sciss.de
- */
-
 package de.sciss.maeanderungen
 
 import java.io.{DataInputStream, FileInputStream}
 
 import de.sciss.equal.Implicits._
 import de.sciss.file._
-import de.sciss.maeanderungen.CracksAnalysis.POLE_COOKIE
 import de.sciss.synth.io.{AudioFile, AudioFileSpec}
+import CracksAnalysis.POLE_COOKIE
 
 // temporary program to convert old binary format files
 object BridgePolesBinToAudio {

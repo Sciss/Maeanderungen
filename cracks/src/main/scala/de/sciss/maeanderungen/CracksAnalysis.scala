@@ -1,32 +1,20 @@
-/*
- *  CracksAnalysis.scala
- *  (Mäanderungen)
- *
- *  Copyright (c) 2017-2018 Hanns Holger Rutz. All rights reserved.
- *
- *  This software is published under the GNU General Public License v2+
- *
- *
- *  For further information, please contact Hanns Holger Rutz at
- *  contact@sciss.de
- */
-
 package de.sciss.maeanderungen
 
 import java.awt.geom.Line2D
 import java.awt.image.BufferedImage
 import java.awt.{Color, RenderingHints}
 import java.io.{DataInputStream, DataOutputStream, FileInputStream, FileOutputStream}
-import javax.imageio.ImageIO
 
 import de.sciss.equal.Implicits._
 import de.sciss.file._
 import de.sciss.neuralgas.ComputeGNG.Result
 import de.sciss.neuralgas.{Algorithm, ComputeGNG, EdgeGNG, ImagePD, LineFloat2D, NodeGNG, PointFloat2D}
-import de.sciss.{kollflitz, numbers}
+import de.sciss.kollflitz
+import de.sciss.numbers
 import de.sciss.synth.io.{AudioFile, AudioFileSpec}
-import de.sciss.topology.Graph.EdgeMap
 import de.sciss.topology.{EdgeView, Graph, Kruskal}
+import de.sciss.topology.Graph.EdgeMap
+import javax.imageio.ImageIO
 
 import scala.annotation.tailrec
 import scala.collection.{AbstractIterator, breakOut}
@@ -217,7 +205,6 @@ object CracksAnalysis {
   def partition[V, E](edges: Iterable[E], directed: Boolean)
                      (implicit edgeView: EdgeView[V, E]): List[Set[E]] = {
     import edgeView._
-
     val resMaps = edges.foldLeft(List.empty[EdgeMap[V, E]]) { (res, e) =>
       val start = sourceVertex(e)
       val end   = targetVertex(e)
@@ -556,14 +543,14 @@ object CracksAnalysis {
 
         val m1 =  math.min(l1, l2) / (2 * l2)
         val m2 = -math.min(l2, l3) / (2 * l2) + 1.0
-        val a1 = if ((_a1 absdif a2) <= Pi) _a1 else if (_a1 < a2) _a1 + Pi2 else _a1 - Pi2
-        val a3 = if ((_a3 absdif a2) <= Pi) _a3 else if (_a3 < a2) _a3 + Pi2 else _a3 - Pi2
+        val a1 = if ((_a1 absDif a2) <= Pi) _a1 else if (_a1 < a2) _a1 + Pi2 else _a1 - Pi2
+        val a3 = if ((_a3 absDif a2) <= Pi) _a3 else if (_a3 < a2) _a3 + Pi2 else _a3 - Pi2
 
 //        println(s"pathIdx $pathIdx,  m1 ${m1.toFloat}, m2 ${m2.toFloat}, a1 ${debugDegree(a1)}, a2 ${debugDegree(a2)}, a3 ${debugDegree(a3)}")
 
         val sub = (0 until numSteps).iterator.flatMap { step =>
-          val xi: Float = step.linlin(0, numSteps, n1.x, n2.x)
-          val yi: Float = step.linlin(0, numSteps, n1.y, n2.y)
+          val xi: Float = step.linLin(0, numSteps, n1.x, n2.x)
+          val yi: Float = step.linLin(0, numSteps, n1.y, n2.y)
           val dx = xi - n1.x
           val dy = yi - n1.y
           val d0 = math.sqrt(dx*dx + dy*dy)
@@ -571,11 +558,11 @@ object CracksAnalysis {
           assert(w >= 0 && w <= 1, s"pathIdx = $pathIdx, step = $step, w = $w")
 
           val ang = if (w < m1) {
-            val res = w.linlin(-m1, m1, a1, a2)
+            val res = w.linLin(-m1, m1, a1, a2)
 //            println(s"  w ${w.toFloat} - ${debugDegree(res)} < m1")
             res
           } else if (w > m2) {
-            val res = w.linlin(m2, 1.0 + (1.0 - m2), a2, a3)
+            val res = w.linLin(m2, 1.0 + (1.0 - m2), a2, a3)
 //            println(s"  w ${w.toFloat} - ${debugDegree(res)} > m2")
             res
           } else {

@@ -1,12 +1,14 @@
 package de.sciss.maeanderungen
 
-import de.sciss.file._
-import de.sciss.fscape.{Graph, stream}
+import de.sciss.file.file
 import de.sciss.fscape.gui.SimpleGUI
+import de.sciss.fscape.{Graph, stream}
 
 import scala.swing.Swing
 
 object PreprocessTest {
+  def any2stringadd: Nothing = sys.error("WTF")
+
   def main(args: Array[String]): Unit = {
     run()
   }
