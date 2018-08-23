@@ -1,3 +1,16 @@
+/*
+ *  Cam.scala
+ *  (Mäanderungen)
+ *
+ *  Copyright (c) 2017-2018 Hanns Holger Rutz. All rights reserved.
+ *
+ *  This software is published under the GNU Affero General Public License v3+
+ *
+ *
+ *  For further information, please contact Hanns Holger Rutz at
+ *  contact@sciss.de
+ */
+
 package de.sciss.maeanderungen
 
 import java.util.Locale
@@ -9,7 +22,7 @@ import scopt.OptionParser
 
 import scala.util.Try
 
-object CamShot {
+object Cam {
   case class Config(
                     outputFile: File          = file("out.jpg"),
                     width     : Int           = 3280,
