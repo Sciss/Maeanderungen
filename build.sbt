@@ -9,7 +9,8 @@ lazy val commonSettings = Seq(
   homepage     := Some(url(s"https://github.com/Sciss/${name.value}")),
   licenses     := Seq("agpl v3+" -> url("http://www.gnu.org/licenses/agpl-3.0.txt")),
   scalaVersion := "2.12.6",
-  scalacOptions ++= Seq("-deprecation", "-unchecked", "-feature", "-Xfuture", "-encoding", "utf8", "-Xlint")
+  scalacOptions ++= Seq("-deprecation", "-unchecked", "-feature", "-Xfuture", "-encoding", "utf8", "-Xlint"),
+  updateOptions := updateOptions.value.withLatestSnapshots(false)
 )
 
 lazy val root = project.in(file("."))
@@ -55,14 +56,19 @@ lazy val cracks = project.withId(s"$baseNameL-cracks").in(file("cracks"))
     mainClass in (Compile, run) := Some("de.sciss.maeanderungen.Cracks")
   )
 
-lazy val generator = project.withId(s"$baseName-generator").in(file("generator"))
+lazy val generator = project.withId(s"$baseNameL-generator").in(file("generator"))
   .settings(commonSettings)
   .settings(
     name := s"$baseName-Generator",
     libraryDependencies ++= Seq(
-      "de.sciss" %% "mellite"           % "2.25.1",
-      "de.sciss" %% "travelling-ants"   % "0.1.1",
-      "de.sciss" %% "poirot"            % "0.3.0-SNAPSHOT"
+      "de.sciss"          %% "mellite"          % "2.25.1",
+      "de.sciss"          %% "soundprocesses"   % "3.21.1-SNAPSHOT",
+      "de.sciss"          %% "fscape"           % "2.16.1-SNAPSHOT",
+      "de.sciss"          %% "travelling-ants"  % "0.1.1",
+      "de.sciss"          %% "poirot"           % "0.3.0-SNAPSHOT",
+      "com.github.scopt"  %% "scopt"            % "3.7.0"
     ),
+    scalacOptions += "-Yrangepos",  // this is needed to extract source code
+    fork in run := true,
     mainClass in (Compile, run) := Some("de.sciss.maeanderungen.Generator")
   )
