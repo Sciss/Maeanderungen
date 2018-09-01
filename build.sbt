@@ -49,7 +49,7 @@ lazy val cracks = project.withId(s"$baseNameL-cracks").in(file("cracks"))
       "de.sciss"          %% "fscape-core"      % "2.16.0",
       "de.sciss"          %% "travelling-ants"  % "0.1.1",
       "de.sciss"          %  "jrpicam"          % "0.2.0",
-      "de.sciss"          %% "poirot"           % "0.3.0-SNAPSHOT",
+//      "de.sciss"          %% "poirot"           % "0.3.0",
       "com.pi4j"          %  "pi4j-core"        % "1.1",
       "com.github.scopt"  %% "scopt"            % "3.7.0"
     ),
@@ -61,11 +61,11 @@ lazy val generator = project.withId(s"$baseNameL-generator").in(file("generator"
   .settings(
     name := s"$baseName-Generator",
     libraryDependencies ++= Seq(
-      "de.sciss"          %% "mellite"          % "2.25.1",
-      "de.sciss"          %% "soundprocesses"   % "3.21.1-SNAPSHOT",
-      "de.sciss"          %% "fscape"           % "2.16.1-SNAPSHOT",
+      "de.sciss"          %% "mellite"          % "2.26.0",
+      "de.sciss"          %% "soundprocesses"   % "3.21.1",
+      "de.sciss"          %% "fscape"           % "2.17.0",
       "de.sciss"          %% "travelling-ants"  % "0.1.1",
-      "de.sciss"          %% "poirot"           % "0.3.0-SNAPSHOT",
+      "de.sciss"          %% "poirot"           % "0.3.0",
       "com.github.scopt"  %% "scopt"            % "3.7.0"
     ),
     scalacOptions += "-Yrangepos",  // this is needed to extract source code

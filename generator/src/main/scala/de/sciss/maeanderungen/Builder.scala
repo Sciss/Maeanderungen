@@ -49,8 +49,9 @@ object Builder {
 
     opt match {
       case Some(x) =>
-        if (version < 0 || x.attr.$[IntObj]("version").exists(_.value >= version)) x
-        else {
+        if (version < 0 || x.attr.$[IntObj]("version").exists(_.value >= version)) {
+          x
+        } else {
           remove(x)
           add()
         }
