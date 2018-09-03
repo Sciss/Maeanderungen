@@ -19,7 +19,12 @@ import de.sciss.mellite.Mellite
 import de.sciss.synth.proc.{Durable, Workspace}
 
 object Generator {
-  case class Config(ws: File = file("material.mllt"))
+  case class Config(ws      : File    = file("material.mllt"),
+                    minDur  : Double  = 60.0 * 4,
+                    maxDur  : Double  = 60.0 * 8,
+                    radio   : Boolean = false,
+                    prepare : Boolean = true,
+                   )
 
   def main(args: Array[String]): Unit = {
     val default = Config()
@@ -29,6 +34,22 @@ object Generator {
         .required()
         .text(s"Input Mellite workspace that contains 'material' folder.")
         .action { (v, c) => c.copy(ws = v) }
+
+      opt[Double]("min-dur")
+        .text(s"Minimum duration in seconds (default: ${default.minDur})")
+        .action { (v, c) => c.copy(minDur = v) }
+
+      opt[Double]("max-dur")
+        .text(s"Maximum duration in seconds (default: ${default.maxDur})")
+        .action { (v, c) => c.copy(maxDur = v) }
+
+      opt[Unit]('r', "radio")
+        .text("Version for radio instead of installation")
+        .action { (_, c) => c.copy(radio = true) }
+
+      opt[Unit]("no-prepare")
+        .text("Do not run preparation stage")
+        .action { (_, c) => c.copy(prepare = false) }
     }
     p.parse(args, default).fold(sys.exit(1)) { implicit config => run() }
   }
@@ -42,7 +63,8 @@ object Generator {
         implicit val _d: Workspace.Durable = d
         try {
           d.system.step { implicit tx =>
-            Preparation.process[S]()
+            if (config.prepare) Preparation.process[S]()
+            Layer.process[S]()
           }
         } finally {
           d.close()

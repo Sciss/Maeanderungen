@@ -13,21 +13,21 @@
 
 package de.sciss.maeanderungen
 
-import de.sciss.lucre.stm.{Random, TxnLike}
+import de.sciss.lucre.stm.Random
 
 import scala.language.implicitConversions
 
 object PD {
-  implicit def const(d: Double): PD = Const(d)
+  implicit def const[Tx](d: Double): PD[Tx] = Const(d)
 
-  def rangeRand(lo: Double, hi: Double)(implicit r: Random[TxnLike]): PD = {
+  def rangeRand[Tx](lo: Double, hi: Double)(implicit r: Random[Tx]): PD[Tx] = {
     val lo1     = math.min(lo, hi)
     val hi1     = math.max(lo, hi)
     val span    = hi1 - lo1
     new RangeRand(lo1, hi1, span)
   }
 
-  def expRand(lo: Double, hi: Double)(implicit r: Random[TxnLike]): PD = {
+  def expRand[Tx](lo: Double, hi: Double)(implicit r: Random[Tx]): PD[Tx] = {
     val lo1     = math.min(lo, hi)
     val hi1     = math.max(lo, hi)
     val ratio0  = hi1 / lo1
@@ -35,24 +35,24 @@ object PD {
     new ExpRand(lo1, hi1, ratio)
   }
 
-  private final case class Const(d: Double) extends PD {
-    def sample()(implicit tx: TxnLike): Double = d
+  private final case class Const[Tx](d: Double) extends PD[Tx] {
+    def sample()(implicit tx: Tx): Double = d
   }
 
-  private final class RangeRand(lo: Double, hi: Double, span: Double)(implicit r: Random[TxnLike])
-    extends PD {
+  private final class RangeRand[Tx](lo: Double, hi: Double, span: Double)(implicit r: Random[Tx])
+    extends PD[Tx] {
 
-    def sample()(implicit tx: TxnLike): Double = r.nextDouble() * span + lo
+    def sample()(implicit tx: Tx): Double = r.nextDouble() * span + lo
   }
 
-  private final class ExpRand(lo: Double, hi: Double, ratio: Double)(implicit r: Random[TxnLike])
-    extends PD {
+  private final class ExpRand[Tx](lo: Double, hi: Double, ratio: Double)(implicit r: Random[Tx])
+    extends PD[Tx] {
 
-    def sample()(implicit tx: TxnLike): Double =
+    def sample()(implicit tx: Tx): Double =
       lo * math.exp(math.log(ratio) * r.nextDouble())
   }
 }
 
-trait PD {
-  def sample()(implicit tx: TxnLike): Double
+trait PD[-Tx] {
+  def sample()(implicit tx: Tx): Double
 }
