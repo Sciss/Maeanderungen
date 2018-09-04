@@ -61,10 +61,14 @@ object MaskingTest extends App {
 
     val fftSizeCep  = fftSize * 2
     val fltSymR     = {
-      RotateWindow(fltSym, fftSize, fftSizeH)
+      val r   = RotateWindow(fltSym, fftSize, fftSizeH)
+      val rr  = ResizeWindow(r  , fftSize, stop = fftSize)
+      val rrr = RotateWindow(rr, fftSizeCep, -fftSizeH)
+      rrr
     }
-    val fltF        = Real1FullFFT(in = fltSymR, size = fftSize, padding = fftSize)
-    val fltFLogC    = fltF.complex.log.max(-160) // (-80)
+//    val fltF        = Real1FullFFT(in = fltSymR, size = fftSize, padding = fftSize)
+    val fltF        = Real1FullFFT(in = fltSymR, size = fftSizeCep, padding = 0)
+    val fltFLogC    = fltF.complex.log.max(-320) // (-80)
 
     val cep         = Complex1IFFT(in = fltFLogC, size = fftSizeCep) / fftSize
     val cepOut      = FoldCepstrum(in = cep, size = fftSizeCep,
