@@ -11,7 +11,8 @@ import scala.concurrent.duration.Duration
 object MaskingTest extends App {
   val fIn1      = file("/data/projects/Maeanderungen/audio_work/edited/SV_2_NC_T167.wav")
   val fIn2      = file("/data/projects/Maeanderungen/wolke/AUFNAHMEN/Piezo/PZ_03.wav")
-  val fOut      = file("/data/temp/masking-ir.aif")
+  val fOutMin   = file("/data/temp/masking-ir.aif")
+  val fOutFlt   = file("/data/temp/masking-flt.aif")
   val specIn1   = AudioFile.readSpec(fIn1)
   val specIn2   = AudioFile.readSpec(fIn2)
   val numFrames = math.min(specIn1.numFrames, specIn2.numFrames)
@@ -21,10 +22,12 @@ object MaskingTest extends App {
 
     val in1       = AudioFileIn(fIn1, numChannels = 1) // .drop(29363)
 //    val in2       = AudioFileIn(fIn2, numChannels = 2).out(0) // .drop(40000) * 0.7
-    val in2       = AudioFileIn(fIn2, numChannels = 1) * 2
+    def mkBgIn() = AudioFileIn(fIn2, numChannels = 1) * 2
+    val in2       = mkBgIn()
     val fMin      = 50.0
     val sr        = 48000.0
-    val winSize   = ((sr / fMin) * 3).ceil.toInt
+    val winSizeH  = ((sr / fMin) * 3).ceil.toInt / 2
+    val winSize   = winSizeH * 2
     val stepSize  = winSize / 2
     val fftSizeH  = winSize.nextPowerOfTwo
     val fftSize   = fftSizeH * 2
@@ -80,8 +83,21 @@ object MaskingTest extends App {
     val fltMin0     = Real1FullIFFT (in = fltMinFExpC, size = fftSizeCep)
     val fltMin      = ResizeWindow(fltMin0, fftSizeCep, stop = -fftSize)
 
-    val framesWritten = AudioFileOut(fltMin, fOut, AudioFileSpec(numChannels = 1, sampleRate = sr))
-    framesWritten.poll(sr * 10, "frames")
+    val writtenMin = AudioFileOut(fltMin, fOutMin, AudioFileSpec(numChannels = 1, sampleRate = sr))
+    writtenMin.poll(sr * 10, "frames-min")
+
+    val bg        = mkBgIn().take(numFrames)
+    val bgS       = Sliding(bg, size = winSize, step = stepSize)
+    val bgW       = bgS * GenWindow(winSize, shape = GenWindow.Hann)
+    val convSize  = (winSize + fftSize - 1).nextPowerOfTwo
+    val bgF       = Real1FFT(bgW /* RotateWindow(bgW, winSize, -winSizeH) */, winSize, convSize - winSize)
+    val fltMinFF  = Real1FFT(fltMin, fftSize, convSize - fftSize)
+    val convF     = bgF.complex * fltMinFF
+    val conv      = Real1IFFT(convF, convSize) * convSize
+    val convLap   = OverlapAdd(conv, convSize, stepSize)
+
+    val writtenFlt = AudioFileOut(convLap, fOutFlt, AudioFileSpec(numChannels = 1, sampleRate = sr))
+    writtenFlt.poll(sr * 10, "frames-flt")
   }
 
   val config = stream.Control.Config()
