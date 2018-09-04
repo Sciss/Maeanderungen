@@ -28,3 +28,7 @@ The repository is now used as a basis for developing the _Mäanderungen_ radio p
 _Mäanderungen_ is a project by Nayarí Castillo, Reni Hofmüller, Hanns Holger Rutz, and Miriam Raggam.
 It won the 3rd lime\_lab prize - laboratory for the development of experimental media and 
 boundary crossing radio play - awarded by the Federal Chancellery of Austria (BKA).
+
+## generator
+
+- `Preparation`: expects a workspace with top-level folder `material`
