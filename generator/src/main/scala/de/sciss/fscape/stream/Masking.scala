@@ -323,9 +323,16 @@ object Masking {
           val ci  = col absDif _blurColumns
           val ri  = row absDif _blurRows
           // blurs refer to -60 dB point
-          val dampCol = 0.001.pow(ci.toDouble / _blurColumns)
-          val dampRow = 0.001.pow(ri.toDouble / _blurRows   )
+          val dc      = ci.toDouble / _blurColumns
+          val dr      = ri.toDouble / _blurRows
+          val dampCol = 0.001.pow(dc)
+          val dampRow = 0.001.pow(dr)
           math.sqrt(dampCol * dampRow)
+//          math .min(dampCol , dampRow)
+//          math.sqrt((dampCol.squared + dampRow.squared) / 2)
+
+//          val dd = math.sqrt(dc.squared + dr.squared)
+//          0.001.pow(dd)
         }
       }
 

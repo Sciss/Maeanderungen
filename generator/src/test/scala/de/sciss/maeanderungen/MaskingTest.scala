@@ -43,8 +43,8 @@ object MaskingTest extends App {
     val in1Mag    = in1F.complex.mag
     val in2Mag    = in2F.complex.mag
 
-    val blurTime  = ((0.5 * sr) / stepSize).ceil.toInt
-    val blurFreq  = (150.0 / (sr / fftSize)).ceil.toInt
+    val blurTime  = ((1.5 /* 0.5 */ * sr) / stepSize).ceil.toInt
+    val blurFreq  = (200.0 /* 150.0 */ / (sr / fftSize)).ceil.toInt
     val columns   = blurTime * 2 + 1
     def post      = DC(0).take(blurTime * fftSizeH)
     val in1Pad    = in1Mag ++ post
@@ -94,7 +94,7 @@ object MaskingTest extends App {
     val fltMinFF  = Real1FFT(fltMin, fftSize, convSize - fftSize)
     val convF     = bgF.complex * fltMinFF
     val conv      = Real1IFFT(convF, convSize) * convSize
-    val convLap   = OverlapAdd(conv, convSize, stepSize)
+    val convLap   = OverlapAdd(conv, convSize, stepSize).take(numFrames)
 
     val writtenFlt = AudioFileOut(convLap, fOutFlt, AudioFileSpec(numChannels = 1, sampleRate = sr))
     writtenFlt.poll(sr * 10, "frames-flt")
