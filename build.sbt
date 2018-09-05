@@ -10,7 +10,8 @@ lazy val commonSettings = Seq(
   licenses     := Seq("agpl v3+" -> url("http://www.gnu.org/licenses/agpl-3.0.txt")),
   scalaVersion := "2.12.6",
   scalacOptions ++= Seq("-deprecation", "-unchecked", "-feature", "-Xfuture", "-encoding", "utf8", "-Xlint"),
-  updateOptions := updateOptions.value.withLatestSnapshots(false)
+  updateOptions := updateOptions.value.withLatestSnapshots(false),
+  resolvers    += "Oracle Repository" at "http://download.oracle.com/maven"  // required for sleepycat
 )
 
 lazy val root = project.in(file("."))

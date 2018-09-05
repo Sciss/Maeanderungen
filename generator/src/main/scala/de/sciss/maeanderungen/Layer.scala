@@ -13,15 +13,19 @@
 
 package de.sciss.maeanderungen
 
+import de.sciss.equal.Implicits._
 import de.sciss.kollflitz.Vec
 import de.sciss.lucre.bitemp.BiGroup
 import de.sciss.lucre.expr.{BooleanObj, DoubleObj, IntObj, LongObj, SpanLikeObj}
 import de.sciss.lucre.stm.{Folder, Random, Sys, TxnRandom}
 import de.sciss.maeanderungen.Builder._
 import de.sciss.maeanderungen.Ops._
+import de.sciss.numbers.Implicits._
+import de.sciss.mellite.ProcActions
 import de.sciss.span.Span
+import de.sciss.synth.Curve
 import de.sciss.synth.proc.Implicits._
-import de.sciss.synth.proc.{AudioCue, Proc, TimeRef, Timeline, Workspace}
+import de.sciss.synth.proc.{AudioCue, FadeSpec, ObjKeys, Proc, TimeRef, Timeline, Workspace}
 
 import scala.annotation.tailrec
 
@@ -30,10 +34,13 @@ object Layer {
   final val attrPauses  = "pauses"
   final val attrBreak   = "break"
   final val attrIntel   = "TV"
+  final val attrLoud95  = "loud-95"
 
   final case class Pause(span: Span, break: Boolean)
 
   final case class RegionAt(frame: Long, span: Span, pause: Option[Pause])
+
+  final case class PlacedRegion(posTL: Long, region: RegionAt)
 
   final class Context[S <: Sys[S]](
                                     val tl            : Timeline.Modifiable[S],
@@ -41,6 +48,7 @@ object Layer {
                                     val category      : Category,
                                     val material      : AudioCue.Obj[S],
                                     val matNumFrames  : Long,
+                                    val loud95        : Double,
                                     val pauses        : Vec[Pause],
                                     val intelligible  : Boolean,
                                     val complete      : Boolean,
@@ -52,7 +60,7 @@ object Layer {
   def process[S <: Sys[S]]()(implicit tx: S#Tx, workspace: Workspace[S], config: Config): Unit = {
     val root          = workspace.root
     val fRender       = mkFolder(root, "renderings")
-    val now           = System.currentTimeMillis()
+    val now           = 0L // XXX TODO System.currentTimeMillis()
     val tlOpt         = fRender.iterator.collect {
       case tlm: Timeline.Modifiable[S] => tlm
     } .toList.lastOption
@@ -97,7 +105,7 @@ object Layer {
     val complete      = mAttr.$[BooleanObj]("K" ).fold(c.defaultComplete    )(_.value)
     val sequential    = mAttr.$[BooleanObj]("H" ).fold(c.defaultSequential  )(_.value)
     val transformable = false // !sequential // this is currently synonymous
-    val transform     = transformable && {
+    val transform     = false /* XXX TODO */ && transformable && {
       val prob = if (c.isText) config.probTransformText else config.probTransformSound
       val coin = rnd.nextDouble() < prob // ; rndUsed() = true
       coin
@@ -120,12 +128,14 @@ object Layer {
 
     val matV          = mat.value
     val matNumFrames  = (matV.numFrames.toDouble / matV.sampleRate * TimeRef.SampleRate).toLong
+    val loud95        = mat.attr.![DoubleObj](attrLoud95).value
 
     implicit val ctx: Context[S] = new Context(
       tl            = tl,
-      tlNumFrames     = numFrames,
+      tlNumFrames   = numFrames,
       category      = c,
       material      = mat,
+      loud95        = loud95,
       matNumFrames  = matNumFrames,
       pauses        = pauses,
       intelligible  = intelligible,
@@ -142,15 +152,6 @@ object Layer {
         putPlainSound()
       }
     }
-
-    ???
-
-    /*
-
-        val (span, obj) = ProcActions.mkAudioRegion(time = tlSpan,
-          audioCue = audioCue, gOffset = drag.selection.start)
-
-     */
 
     /* if (rndUsed()) */ {
       val seed1 = rnd.nextLong()
@@ -178,7 +179,7 @@ object Layer {
 
      */
 
-    if (complete || !(rnd.nextDouble() < config.probShorten) ) {
+    if (true /* XXX TODO */ || complete || !(rnd.nextDouble() < config.probShorten) ) {
       putPlainTextFull()
     } else {  // shortened
       if (rnd.nextDouble() < config.probShortenFade) {
@@ -214,7 +215,7 @@ object Layer {
     // - frequency filter (indeed that could be the "negative
     //   of the foreground")
 
-    if (ctx.intelligible) {
+    if (true /* XXX TODO */ || ctx.intelligible) {
       putPlainTextFullIntel()
     } else {
       ???
@@ -224,7 +225,7 @@ object Layer {
   def matRegionAt[S <: Sys[S]](frame: Long, includePause: Boolean = false, padRight: Long = 0L)
                               (implicit ctx: Context[S]): Option[RegionAt] = {
     import ctx._
-    require (frame >= 0L && frame < matNumFrames)
+    require (frame >= 0L && frame < matNumFrames, s"0 <= $frame < $matNumFrames")
     val i = pauses.indexWhere(_.span.start > frame)
     if (i < 0) {
       val j     = pauses.lastIndexWhere(_.span.stop <= frame)
@@ -232,9 +233,9 @@ object Layer {
       val stop  = matNumFrames
       Some(RegionAt(frame, Span(start, stop), None))
     } else {
-      val start     = if (i == 0) 0L else pauses(i - 1).span.stop
+      val start     = if (i === 0) 0L else pauses(i - 1).span.stop
       val pause     = pauses(i)
-      val stop      = math.max(matNumFrames, (if (includePause) pause.span.stop else pause.span.start) + padRight)
+      val stop      = math.min(matNumFrames, (if (includePause) pause.span.stop else pause.span.start) + padRight)
       Some(RegionAt(frame, Span(start, stop), Some(pause)))
     }
   }
@@ -243,8 +244,12 @@ object Layer {
                                       (implicit tx: S#Tx, ctx: Context[S]): Option[(SpanLikeObj[S], Proc[S])] =
     getRegionOverlapping[S](span)((_, pr) => pr.attr.$[BooleanObj](attrIntel).exists(_.value))
 
+
+  def existsRegionOverlapping[S <: Sys[S]](span: Span)(implicit tx: S#Tx, ctx: Context[S]): Boolean =
+    getRegionOverlapping[S](span)((_, _) => true).isDefined
+
   def getRegionOverlapping[S <: Sys[S]](span: Span)(p: (SpanLikeObj[S], Proc[S]) => Boolean)
-                                          (implicit tx: S#Tx, ctx: Context[S]): Option[(SpanLikeObj[S], Proc[S])] = {
+                                       (implicit tx: S#Tx, ctx: Context[S]): Option[(SpanLikeObj[S], Proc[S])] = {
     import ctx._
     val it = tl.intersect(span).flatMap {
       case (_: Span, vec) =>
@@ -259,11 +264,56 @@ object Layer {
 
   // puts a plain (non-transformed) text in full, retaining intelligibility
   def putPlainTextFullIntel[S <: Sys[S]]()(implicit tx: S#Tx, ctx: Context[S], config: Config): Unit = {
-    val placementOpt = tryPlacePlainTextFullIntel[S]()
+    import ctx._
+    val placementOpt  = tryPlacePlainTextFullIntel[S]()
+    val gainVal       = DoubleObj .newConst[S]((65.0 - loud95).dbAmp)
+    val intelObj      = BooleanObj.newVar[S](intelligible)
+    placementOpt.foreach { placement =>
+      val vec = placement.toVector
+      for (i <- vec.indices) {
+        val placed = vec(i)
+        val fadeIn = if (i == 0) 0L else {
+          val pred = vec(i - 1)
+          if (placed.posTL === pred.posTL + pred.region.span.length) 0L
+          else {
+            pred.region.pause.fold(0L)(pause => pause.span.length / 2)
+          }
+        }
+        val fadeOut = if (i == vec.size - 1) 0L else {
+          val succ = vec(i + 1)
+          if (placed.posTL + placed.region.span.length === succ.posTL) 0L
+          else {
+            placed.region.pause.fold(0L)(pause => pause.span.length / 2)
+          }
+        }
+        val startTL = placed.posTL - fadeIn
+        val stopTL  = startTL + fadeIn + fadeOut + placed.region.span.length
+        val gOffset = placed.region.span.start - fadeIn
+        val spanTL  = Span(startTL, stopTL)
+        val (spanObjTL, pr)  = ProcActions.mkAudioRegion(time = spanTL, audioCue = material, gOffset = gOffset)
+        val prAttr = pr.attr
+        if (fadeIn > 0L) {
+          val spec  = FadeSpec(fadeIn, Curve.lin)
+          val fd    = FadeSpec.Obj.newVar[S](spec)
+          prAttr.put(ObjKeys.attrFadeIn, fd)
+        }
+        if (fadeOut > 0L) {
+          val spec  = FadeSpec(fadeOut, Curve.lin)
+          val fd    = FadeSpec.Obj.newVar[S](spec)
+          prAttr.put(ObjKeys.attrFadeOut, fd)
+        }
+        val gainObj = DoubleObj.newVar[S](gainVal)
+        prAttr.put(ObjKeys.attrGain, gainObj)
+        prAttr.put(attrIntel, intelObj)
+
+        tl.add(spanObjTL, pr)
+      }
+    }
   }
 
     // puts a plain (non-transformed) text in full, retaining intelligibility
-  def tryPlacePlainTextFullIntel[S <: Sys[S]]()(implicit tx: S#Tx, ctx: Context[S], config: Config): Option[List[Long]] = {
+  def tryPlacePlainTextFullIntel[S <: Sys[S]]()(implicit tx: S#Tx, ctx: Context[S],
+                                                config: Config): Option[List[PlacedRegion]] = {
     import ctx._
 
     val pos0TLTry = (rnd.nextDouble() * (tlNumFrames - matNumFrames)).toLong
@@ -309,23 +359,23 @@ object Layer {
     val pos0TLOpt = findLeft(reg0, pos0TLTry) orElse findRight(reg0, pos0TLTry)
     if (pos0TLOpt.isEmpty) return None
 
-    val placement = List.newBuilder[Long]
+    val placement = List.newBuilder[PlacedRegion]
 
     val pos0TL    = pos0TLOpt.get
     var posCurrTL = pos0TL
-    placement += pos0TL
+    placement += PlacedRegion(pos0TL, reg0)
     var currReg   = reg0
     while (currReg.span.stop < matNumFrames) {
       val posNextTLTry  = posCurrTL + currReg.span.length
-      val nextReg       = matRegionAt(posNextTLTry, includePause = true).get
+      val nextReg       = matRegionAt(currReg.span.stop + 1, includePause = true).get
       val posNextTLOpt  = findRight(nextReg, posNextTLTry)
       if (posNextTLOpt.isEmpty) return None
       val posNextTL     = posNextTLOpt.get
       val shift         = posNextTL - posNextTLTry
-      val shiftOk       = shift == 0L || currReg.pause.forall(_.break) || shift < currReg.pause.fold(0L)(_.span.length)
+      val shiftOk       = shift === 0L || currReg.pause.forall(_.break) || shift < currReg.pause.fold(0L)(_.span.length)
       if (!shiftOk) return None
 
-      placement += posNextTL
+      placement += PlacedRegion(posNextTL, nextReg)
       currReg           = nextReg
       posCurrTL         = posNextTL
     }
