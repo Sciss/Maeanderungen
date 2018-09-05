@@ -10,7 +10,8 @@ import scala.concurrent.duration.Duration
 
 object MaskingTest extends App {
   val fIn1      = file("/data/projects/Maeanderungen/audio_work/edited/SV_2_NC_T167.wav")
-  val fIn2      = file("/data/projects/Maeanderungen/wolke/AUFNAHMEN/Piezo/PZ_03.wav")
+//  val fIn2      = file("/data/projects/Maeanderungen/wolke/AUFNAHMEN/Piezo/PZ_03.wav")
+  val fIn2      = file("/data/projects/Maeanderungen/audio_work/edited/MT-12_MR_T106.wav")
   val fOutMin   = file("/data/temp/masking-ir.aif")
   val fOutFlt   = file("/data/temp/masking-flt.aif")
   val specIn1   = AudioFile.readSpec(fIn1)
@@ -22,7 +23,7 @@ object MaskingTest extends App {
 
     val in1       = AudioFileIn(fIn1, numChannels = 1) // .drop(29363)
 //    val in2       = AudioFileIn(fIn2, numChannels = 2).out(0) // .drop(40000) * 0.7
-    def mkBgIn() = AudioFileIn(fIn2, numChannels = 1) * 2
+    def mkBgIn() = AudioFileIn(fIn2, numChannels = 1) * (-0.0.dbAmp)
     val in2       = mkBgIn()
     val fMin      = 50.0
     val sr        = 48000.0
@@ -43,7 +44,7 @@ object MaskingTest extends App {
     val in1Mag    = in1F.complex.mag
     val in2Mag    = in2F.complex.mag
 
-    val blurTime  = ((1.5 /* 0.5 */ * sr) / stepSize).ceil.toInt
+    val blurTime  = ((2.0 /* 0.5 */ * sr) / stepSize).ceil.toInt
     val blurFreq  = (200.0 /* 150.0 */ / (sr / fftSize)).ceil.toInt
     val columns   = blurTime * 2 + 1
     def post      = DC(0).take(blurTime * fftSizeH)
@@ -53,9 +54,11 @@ object MaskingTest extends App {
     println(s"blurTime $blurTime, blurFreq $blurFreq, winSize $winSize, stepSize $stepSize, fftSize $fftSize")
 
     val mask      = Masking(fg = in1Pad, bg = in2Pad, rows = fftSizeH, columns = columns,
-      threshNoise = 0.5e-3, threshMask = 0.5, blurRows = blurFreq, blurColumns = blurTime)
+      threshNoise = -56.0.dbAmp /* 0.5e-3 */, threshMask = -6.0.dbAmp /* 0.5 */, blurRows = blurFreq, blurColumns = blurTime)
 
 //    Plot1D(mask.drop(fftSizeH * 16).ampDb, size = fftSizeH)
+
+    RunningMax(mask < 1.0).last.poll(0, "has-filter?")
 
     val maskC     = mask zip DC(0)
     val fltSym    = (Real1IFFT(maskC, size = fftSize) / fftSizeH).drop(blurTime * fftSize)
