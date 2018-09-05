@@ -13,23 +13,28 @@
 
 package de.sciss.maeanderungen
 
+import java.text.SimpleDateFormat
+import java.util.Locale
+
 import de.sciss.equal.Implicits._
 import de.sciss.kollflitz.Vec
 import de.sciss.lucre.bitemp.BiGroup
-import de.sciss.lucre.expr.{BooleanObj, DoubleObj, IntObj, LongObj, SpanLikeObj}
-import de.sciss.lucre.stm.{Folder, Random, Sys, TxnRandom}
+import de.sciss.lucre.expr.{BooleanObj, DoubleObj, IntObj, LongObj}
+import de.sciss.lucre.stm.{Cursor, Folder, Random, Sys, TxnRandom}
 import de.sciss.maeanderungen.Builder._
+import de.sciss.maeanderungen.LayerUtil._
 import de.sciss.maeanderungen.Ops._
+import de.sciss.mellite.gui.ObjView
 import de.sciss.numbers.Implicits._
-import de.sciss.mellite.ProcActions
 import de.sciss.span.Span
-import de.sciss.synth.Curve
 import de.sciss.synth.proc.Implicits._
-import de.sciss.synth.proc.{AudioCue, FadeSpec, ObjKeys, Proc, TimeRef, Timeline, Workspace}
+import de.sciss.synth.proc.{AudioCue, Proc, TimeRef, Timeline, Workspace}
 
 import scala.annotation.tailrec
 
 object Layer {
+  final val DEFAULT_VERSION = 1
+
   final val attrSeed    = "seed"
   final val attrPauses  = "pauses"
   final val attrBreak   = "break"
@@ -53,29 +58,43 @@ object Layer {
                                     val intelligible  : Boolean,
                                     val complete      : Boolean,
                                     val sequential    : Boolean,
+                                    val pan           : Double,
+                                    val pTape1        : Proc[S],
+                                    val pTape2        : Proc[S],
+                                    val pMain         : Proc[S],
     )(
-      implicit val rnd: Random[S#Tx]
+      implicit val rnd: Random[S#Tx], val cursor: Cursor[S]
     )
 
   def process[S <: Sys[S]]()(implicit tx: S#Tx, workspace: Workspace[S], config: Config): Unit = {
+    implicit val cursor: Cursor[S] = workspace.cursor
     val root          = workspace.root
     val fRender       = mkFolder(root, "renderings")
-    val now           = 0L // XXX TODO System.currentTimeMillis()
+    val fAux          = mkFolder(root, "aux")
+    val pTape1        = mkObj[S, Proc](fAux, "tape-1", DEFAULT_VERSION)(mkTapeGraph(1))
+    val pTape2        = mkObj[S, Proc](fAux, "tape-2", DEFAULT_VERSION)(mkTapeGraph(2))
+    val now           = System.currentTimeMillis()
     val tlOpt         = fRender.iterator.collect {
       case tlm: Timeline.Modifiable[S] => tlm
     } .toList.lastOption
 
     val tl: Timeline.Modifiable[S] = tlOpt.getOrElse {
       val _tl   = Timeline[S]
-      _tl.name  = s"Rendering-${now.toHexString}"
+      addDefaultGlobalProc(_tl)
+      val format  = new SimpleDateFormat("'Rendering-'yyMMdd'_'HHmmss", Locale.US)
+      _tl.name    = format.format(new java.util.Date(now))
       fRender.addLast(_tl)
       _tl
+    }
+    val pMain = tl.globalObjects.next() match {
+      case p: Proc[S] => p
+      case _ => sys.error("Could not find main proc")
     }
 
     val seed0: LongObj.Var[S] = tl.attr.$[LongObj](attrSeed) match {
       case Some(LongObj.Var(vr)) => vr
       case _ =>
-        val _seed = LongObj.newVar[S](now)
+        val _seed = LongObj.newVar[S](config.seed.getOrElse(now): Long)
         tl.attr.put(attrSeed, _seed)
         _seed
     }
@@ -104,8 +123,8 @@ object Layer {
     val intelligible  = mAttr.$[BooleanObj](attrIntel).fold(c.defaultIntelligible)(_.value)
     val complete      = mAttr.$[BooleanObj]("K" ).fold(c.defaultComplete    )(_.value)
     val sequential    = mAttr.$[BooleanObj]("H" ).fold(c.defaultSequential  )(_.value)
-    val transformable = false // !sequential // this is currently synonymous
-    val transform     = false /* XXX TODO */ && transformable && {
+    val transformable = false /* XXX TODO */ // !sequential // this is currently synonymous
+    val transform     = transformable && {
       val prob = if (c.isText) config.probTransformText else config.probTransformSound
       val coin = rnd.nextDouble() < prob // ; rndUsed() = true
       coin
@@ -130,6 +149,11 @@ object Layer {
     val matNumFrames  = (matV.numFrames.toDouble / matV.sampleRate * TimeRef.SampleRate).toLong
     val loud95        = mat.attr.![DoubleObj](attrLoud95).value
 
+    val pan = if ((matV.numChannels !== 1) || config.maxPan <= 0) 0.0 else {
+      val x = rnd.nextDouble()
+      x.linLin(0.0, 1.0, -config.maxPan, +config.maxPan)
+    }
+
     implicit val ctx: Context[S] = new Context(
       tl            = tl,
       tlNumFrames   = numFrames,
@@ -141,6 +165,10 @@ object Layer {
       intelligible  = intelligible,
       complete      = complete,
       sequential    = sequential,
+      pan           = pan,
+      pTape1        = pTape1,
+      pTape2        = pTape2,
+      pMain         = pMain
     )
 
     if (transform) {
@@ -222,52 +250,13 @@ object Layer {
     }
   }
 
-  def matRegionAt[S <: Sys[S]](frame: Long, includePause: Boolean = false, padRight: Long = 0L)
-                              (implicit ctx: Context[S]): Option[RegionAt] = {
-    import ctx._
-    require (frame >= 0L && frame < matNumFrames, s"0 <= $frame < $matNumFrames")
-    val i = pauses.indexWhere(_.span.start > frame)
-    if (i < 0) {
-      val j     = pauses.lastIndexWhere(_.span.stop <= frame)
-      val start = if (j >= 0) pauses(j).span.stop else 0L
-      val stop  = matNumFrames
-      Some(RegionAt(frame, Span(start, stop), None))
-    } else {
-      val start     = if (i === 0) 0L else pauses(i - 1).span.stop
-      val pause     = pauses(i)
-      val stop      = math.min(matNumFrames, (if (includePause) pause.span.stop else pause.span.start) + padRight)
-      Some(RegionAt(frame, Span(start, stop), Some(pause)))
-    }
-  }
-
-  def getIntelOverlapping[S <: Sys[S]](span: Span)
-                                      (implicit tx: S#Tx, ctx: Context[S]): Option[(SpanLikeObj[S], Proc[S])] =
-    getRegionOverlapping[S](span)((_, pr) => pr.attr.$[BooleanObj](attrIntel).exists(_.value))
-
-
-  def existsRegionOverlapping[S <: Sys[S]](span: Span)(implicit tx: S#Tx, ctx: Context[S]): Boolean =
-    getRegionOverlapping[S](span)((_, _) => true).isDefined
-
-  def getRegionOverlapping[S <: Sys[S]](span: Span)(p: (SpanLikeObj[S], Proc[S]) => Boolean)
-                                       (implicit tx: S#Tx, ctx: Context[S]): Option[(SpanLikeObj[S], Proc[S])] = {
-    import ctx._
-    val it = tl.intersect(span).flatMap {
-      case (_: Span, vec) =>
-        vec.collectFirst {
-          case BiGroup.Entry(sp, pr: Proc[S]) if p(sp, pr) => (sp, pr)
-        }
-
-      case _ => None
-    }
-    it.headOption
-  }
-
   // puts a plain (non-transformed) text in full, retaining intelligibility
   def putPlainTextFullIntel[S <: Sys[S]]()(implicit tx: S#Tx, ctx: Context[S], config: Config): Unit = {
     import ctx._
     val placementOpt  = tryPlacePlainTextFullIntel[S]()
-    val gainVal       = DoubleObj .newConst[S]((65.0 - loud95).dbAmp)
+    val gainVal       = (65.0 - loud95).dbAmp
     val intelObj      = BooleanObj.newVar[S](intelligible)
+    val colorVal      = mkColor(ctx.material)
     placementOpt.foreach { placement =>
       val vec = placement.toVector
       for (i <- vec.indices) {
@@ -290,23 +279,11 @@ object Layer {
         val stopTL  = startTL + fadeIn + fadeOut + placed.region.span.length
         val gOffset = placed.region.span.start - fadeIn
         val spanTL  = Span(startTL, stopTL)
-        val (spanObjTL, pr)  = ProcActions.mkAudioRegion(time = spanTL, audioCue = material, gOffset = gOffset)
+        val (_, pr)  = mkAudioRegion(tl, time = spanTL, audioCue = material, gOffset = gOffset,
+          fadeIn = fadeIn, fadeOut = fadeOut, gain = gainVal)
         val prAttr = pr.attr
-        if (fadeIn > 0L) {
-          val spec  = FadeSpec(fadeIn, Curve.lin)
-          val fd    = FadeSpec.Obj.newVar[S](spec)
-          prAttr.put(ObjKeys.attrFadeIn, fd)
-        }
-        if (fadeOut > 0L) {
-          val spec  = FadeSpec(fadeOut, Curve.lin)
-          val fd    = FadeSpec.Obj.newVar[S](spec)
-          prAttr.put(ObjKeys.attrFadeOut, fd)
-        }
-        val gainObj = DoubleObj.newVar[S](gainVal)
-        prAttr.put(ObjKeys.attrGain, gainObj)
         prAttr.put(attrIntel, intelObj)
-
-        tl.add(spanObjTL, pr)
+        prAttr.put(ObjView.attrColor, /* Color.Obj.newVar( */ colorVal /* ) */)
       }
     }
   }

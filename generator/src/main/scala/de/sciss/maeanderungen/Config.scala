@@ -25,4 +25,7 @@ case class Config(ws                : File    = file("material.mllt"),
                   probTransformSound: Double  = 0.5,
                   probShorten       : Double  = 0.5,
                   probShortenFade   : Double  = 0.25,
+                  numChannels       : Int     = 2,
+                  seed              : Option[Long] = None,
+                  maxPan            : Double  = 0.5,
                  )

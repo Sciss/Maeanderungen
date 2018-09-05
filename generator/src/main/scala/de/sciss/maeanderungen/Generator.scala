@@ -69,6 +69,20 @@ object Generator {
         .text(s"When shortening materials, probability (0 to 1) that we fade in/out instead of hard cut (default: ${default.probShortenFade})")
         .validate { v => if (v >= 0 && v <= 1) success else failure("Must be 0 to 1") }
         .action { (v, c) => c.copy(probShortenFade = v) }
+
+      opt[Int]('c', "num-channels")
+        .text(s"Number of output channels, >= 2 (default: ${default.numChannels})")
+        .validate { v => if (v >= 2) success else failure("Must be >= 2") }
+        .action { (v, c) => c.copy(numChannels = v) }
+
+      opt[Long]("seed")
+        .text("Random number generator seed value")
+        .action { (v, c) => c.copy(seed = Some(v)) }
+
+      opt[Double]("max-pan")
+        .text(s"Maximum pan extent for mono signals (0 to 1) (default: ${default.maxPan})")
+        .validate { v => if (v >= 0 && v <= 1) success else failure("Must be 0 to 1") }
+        .action { (v, c) => c.copy(maxPan = v) }
     }
     p.parse(args, default).fold(sys.exit(1)) { implicit config => run() }
   }
