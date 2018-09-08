@@ -28,4 +28,5 @@ case class Config(ws                : File    = file("material.mllt"),
                   numChannels       : Int     = 2,
                   seed              : Option[Long] = None,
                   maxPan            : Double  = 0.5,
+                  textSoundRatio    : Double  = 1.0
                  )

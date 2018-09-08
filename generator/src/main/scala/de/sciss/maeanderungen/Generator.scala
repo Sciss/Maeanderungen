@@ -83,6 +83,11 @@ object Generator {
         .text(s"Maximum pan extent for mono signals (0 to 1) (default: ${default.maxPan})")
         .validate { v => if (v >= 0 && v <= 1) success else failure("Must be 0 to 1") }
         .action { (v, c) => c.copy(maxPan = v) }
+
+      opt[Double]("text-sound-ratio")
+        .text(s"Probability ratio text to sound (1 = equal) (default: ${default.textSoundRatio})")
+        .validate { v => if (v >= 0) success else failure("Must be >= 0") }
+        .action { (v, c) => c.copy(textSoundRatio = v) }
     }
     p.parse(args, default).fold(sys.exit(1)) { implicit config => run() }
   }

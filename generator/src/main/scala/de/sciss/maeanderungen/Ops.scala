@@ -24,6 +24,13 @@ object Ops {
     def headOption: Option[A] = if (it.hasNext) Some(it.next()) else None
   }
 
+  implicit final class MaeanderungenDoubleOps(private val x: Double) extends AnyVal {
+    def coin[Tx <: TxnLike]()(implicit tx: Tx, r: Random[Tx]): Boolean = {
+      val i = r.nextDouble
+      i < x
+    }
+  }
+
   implicit final class MaeanderungenTraversableOps[A](private val xs: Traversable[A]) extends AnyVal {
     def chooseWeighted[Tx <: TxnLike](weight: A => Double)(implicit tx: Tx, r: Random[Tx]): A = {
       require (xs.nonEmpty)

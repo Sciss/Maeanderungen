@@ -25,6 +25,10 @@ object Category {
 //    def defaultComplete     : Boolean
   }
 
+  sealed trait Sound extends Category {
+    final val isText = false
+  }
+
   case object GettingLost extends Text {
     val name                = "Sich verlieren"
     val abbrev              = "SV"
@@ -90,15 +94,27 @@ object Category {
     val defaultComplete     = false
   }
 
+  case object HybridSound extends Sound {
+    val name                = "Hybrid sound"
+    val abbrev              = "HS"
+    val defaultIntelligible = false
+    val defaultSequential   = false
+    val defaultComplete     = false
+  }
+
   val text: Vec[Text] = Vec(
     GettingLost, CountingTrees, SkyObservations, ChaoticEnumerations, Acrostics, PoeticManuals, MetaText
   )
 
-  val all: Vec[Category] = text // XXX TODO
+  val sound: Vec[Sound] = Vec(
+    HybridSound
+  )
+
+  val all: Vec[Category] = text ++ sound
 
   val abbrevMap: Map[String, Category] = all.iterator.map { c => c.abbrev -> c } .toMap
 
-  private def normalizeWeights(tup: Vec[(Double, Category)]): Vec[(Double, Category)] = {
+  private def normalizeWeights[A](tup: Vec[(Double, A)]): Vec[(Double, A)] = {
     val sum = tup.iterator.map(_._1).sum
     require (sum > 0.0)
     if (sum == 1.0) tup else tup.map {
@@ -106,7 +122,7 @@ object Category {
     }
   }
 
-  val weighted: Vec[(Double, Category)] = normalizeWeights(Vec(
+  val weightedText: Vec[(Double, Text)] = normalizeWeights(Vec(
     0.2 -> GettingLost,
     0.1 -> CountingTrees,
     0.1 -> SkyObservations,
@@ -116,9 +132,20 @@ object Category {
     0.3 -> MetaText
   ))
 
-  def choose[Tx <: TxnLike]()(implicit tx: Tx, r: Random[Tx]): Category = {
+  val weightedSound: Vec[(Double, Sound)] = normalizeWeights(Vec(
+    1.0 -> HybridSound
+  ))
+
+//  val weighted: Vec[(Double, Category)] = normalizeWeights(weightedText ++ weightedSound)
+
+  def chooseText[Tx <: TxnLike]()(implicit tx: Tx, r: Random[Tx]): Text = {
     import Ops._
-    weighted.chooseWeighted(_._1)._2
+    weightedText.chooseWeighted(_._1)._2
+  }
+
+  def chooseSound[Tx <: TxnLike]()(implicit tx: Tx, r: Random[Tx]): Sound = {
+    import Ops._
+    weightedSound.chooseWeighted(_._1)._2
   }
 }
 sealed trait Category {

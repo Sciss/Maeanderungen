@@ -28,7 +28,7 @@ import de.sciss.synth.proc.{AudioCue, Color, GenContext, TimeRef, Timeline, Work
 import de.sciss.synth.{io, proc}
 
 object Preparation {
-  val DEFAULT_VERSION = 9
+  val DEFAULT_VERSION = 11
 
   def process[S <: Sys[S]]()(implicit tx: S#Tx, workspace: Workspace[S]): Unit = {
     val r             = workspace.root
@@ -45,13 +45,15 @@ object Preparation {
 
     f.setGraph {
       val threshLoud    = 15.0
-      val in            = AudioFileIn("in")
-      val sampleRate    = in.sampleRate
+      val in0           = AudioFileIn("in")
+      val in            = Mix.MonoEqP(in0)
+      val sampleRate    = in0.sampleRate
+      val inFrames      = in0.numFrames
 
       // loudness
       val winLoud       = (0.2 * sampleRate).floor
       val stepLoud      = (winLoud/4).floor
-      val framesLoud    = ((in.numFrames + stepLoud - 1) / stepLoud).floor
+      val framesLoud    = ((inFrames + stepLoud - 1) / stepLoud).floor
       val slidLoud      = Sliding(in, size = winLoud, step = stepLoud)
       val loud          = Loudness(slidLoud, sampleRate = sampleRate, size = winLoud, spl = 70, diffuse = 1)
 
@@ -86,7 +88,7 @@ object Preparation {
           numCandidates = numTracks)
 
         val stepPitch   = _pch.stepSize
-        val _frames     = ((in.numFrames + stepPitch - 1) / stepPitch).floor
+        val _frames     = ((inFrames + stepPitch - 1) / stepPitch).floor
 
         val _sr = sampleRate / stepPitch
         (_pch, _sr, _frames)

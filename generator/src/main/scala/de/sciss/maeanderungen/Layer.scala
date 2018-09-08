@@ -17,6 +17,7 @@ import java.text.SimpleDateFormat
 import java.util.Locale
 
 import de.sciss.equal.Implicits._
+import de.sciss.file._
 import de.sciss.kollflitz.Vec
 import de.sciss.lucre.bitemp.BiGroup
 import de.sciss.lucre.expr.{BooleanObj, DoubleObj, IntObj, LongObj}
@@ -45,7 +46,7 @@ object Layer {
 
   final case class RegionAt(frame: Long, span: Span, pause: Option[Pause])
 
-  final case class PlacedRegion(posTL: Long, region: RegionAt)
+  final case class PlacedRegion(posTL: Long, region: RegionAt, relativeGain: Double = 1.0)
 
   final class Context[S <: Sys[S]](
                                     val tl            : Timeline.Modifiable[S],
@@ -65,6 +66,9 @@ object Layer {
     )(
       implicit val rnd: Random[S#Tx], val cursor: Cursor[S]
     )
+
+  def log(what: => String): Unit =
+    println(s"[log] $what")
 
   def process[S <: Sys[S]]()(implicit tx: S#Tx, workspace: Workspace[S], config: Config): Unit = {
     implicit val cursor: Cursor[S] = workspace.cursor
@@ -111,23 +115,29 @@ object Layer {
     }
 
     val numFrames = (durObj.value * TimeRef.SampleRate).toLong
-    val c         = Category.choose()
+    val c         = {
+      val isText = config.textSoundRatio.coin()
+      if (isText) Category.chooseText() else Category.chooseSound()
+    }
     val fMat      = root.![Folder]("material")
 
     val allMat = fMat.iterator.collect {
       case cue: AudioCue.Obj[S] if cue.name.startsWith(c.abbrev) => cue
     } .toVector
 
-    val mat           = allMat.choose() // ; rndUsed() = true
+    val mat           = allMat.choose() // XXX TODO --- this should follow particular probabilities for categories
+    val matV          = mat.value
+
+    log(s"Material: ${matV.artifact.base}")
+
     val mAttr         = mat.attr
     val intelligible  = mAttr.$[BooleanObj](attrIntel).fold(c.defaultIntelligible)(_.value)
     val complete      = mAttr.$[BooleanObj]("K" ).fold(c.defaultComplete    )(_.value)
     val sequential    = mAttr.$[BooleanObj]("H" ).fold(c.defaultSequential  )(_.value)
-    val transformable = false /* XXX TODO */ // !sequential // this is currently synonymous
+    val transformable = false // XXX TODO !sequential // this is currently synonymous
     val transform     = transformable && {
       val prob = if (c.isText) config.probTransformText else config.probTransformSound
-      val coin = rnd.nextDouble() < prob // ; rndUsed() = true
-      coin
+      prob.coin()
     }
 
     val pauses: Vec[Pause] = {
@@ -145,7 +155,6 @@ object Layer {
       it.toVector
     }
 
-    val matV          = mat.value
     val matNumFrames  = (matV.numFrames.toDouble / matV.sampleRate * TimeRef.SampleRate).toLong
     val loud95        = mat.attr.![DoubleObj](attrLoud95).value
 
@@ -276,7 +285,10 @@ object Layer {
           }
         }
         val startTL = placed.posTL - fadeIn
-        val stopTL  = startTL + fadeIn + fadeOut + placed.region.span.length
+        // Note: fade-out implies we have a successive pause which is included
+        // in region.span; to avoid plops at the end, we stop after half the
+        // pause when fading; therefore, do not add the fade-out time here
+        val stopTL  = startTL + fadeIn + /* fadeOut + */ placed.region.span.length
         val gOffset = placed.region.span.start - fadeIn
         val spanTL  = Span(startTL, stopTL)
         val (_, pr)  = mkAudioRegion(tl, time = spanTL, audioCue = material, gOffset = gOffset,

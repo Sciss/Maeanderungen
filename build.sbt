@@ -3,7 +3,7 @@ lazy val baseNameL  = baseName.toLowerCase
 
 lazy val commonSettings = Seq(
   name         := "Maeanderungen",
-  version      := "0.2.0-SNAPSHOT",
+  version      := "0.2.1-SNAPSHOT",
   description  := "An algorithmic art project",
   organization := "de.sciss",
   homepage     := Some(url(s"https://github.com/Sciss/${name.value}")),
@@ -29,7 +29,7 @@ lazy val cam = project.withId(s"$baseNameL-cam").in(file("cam"))
       "de.sciss"          %% "numbers"          % "0.2.0",
       "de.sciss"          %% "kollflitz"        % "0.2.2",
       "de.sciss"          %% "equal"            % "0.1.2",
-      "de.sciss"          %% "fscape-core"      % "2.17.0",
+      "de.sciss"          %% "fscape-core"      % "2.17.1",
       "de.sciss"          %  "jrpicam"          % "0.2.0",
       "com.pi4j"          %  "pi4j-core"        % "1.1",
       "com.github.scopt"  %% "scopt"            % "3.7.0"
@@ -47,7 +47,7 @@ lazy val cracks = project.withId(s"$baseNameL-cracks").in(file("cracks"))
       "de.sciss"          %% "kollflitz"        % "0.2.2",
       "de.sciss"          %% "equal"            % "0.1.2",
       "de.sciss"          %% "topology"         % "1.1.0",
-      "de.sciss"          %% "fscape-core"      % "2.17.0",
+      "de.sciss"          %% "fscape-core"      % "2.17.1",
       "de.sciss"          %% "travelling-ants"  % "0.1.1",
       "de.sciss"          %  "jrpicam"          % "0.2.0",
 //      "de.sciss"          %% "poirot"           % "0.3.0",
@@ -62,9 +62,9 @@ lazy val generator = project.withId(s"$baseNameL-generator").in(file("generator"
   .settings(
     name := s"$baseName-Generator",
     libraryDependencies ++= Seq(
-      "de.sciss"          %% "mellite"          % "2.27.0",
+      "de.sciss"          %% "mellite"          % "2.27.1",
       "de.sciss"          %% "soundprocesses"   % "3.21.1",
-      "de.sciss"          %% "fscape"           % "2.17.0",
+      "de.sciss"          %% "fscape"           % "2.17.1",
       "de.sciss"          %% "travelling-ants"  % "0.1.1",
       "de.sciss"          %% "poirot"           % "0.3.0",
       "com.github.scopt"  %% "scopt"            % "3.7.0"
