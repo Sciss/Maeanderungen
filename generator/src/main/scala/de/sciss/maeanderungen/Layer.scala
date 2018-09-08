@@ -121,11 +121,11 @@ object Layer {
     }
     val fMat      = root.![Folder]("material")
 
-    val allMat = fMat.iterator.collect {
+    val catMat = fMat.iterator.collect {
       case cue: AudioCue.Obj[S] if cue.name.startsWith(c.abbrev) => cue
     } .toVector
 
-    val mat           = allMat.choose() // XXX TODO --- this should follow particular probabilities for categories
+    val mat           = catMat.choose()
     val matV          = mat.value
 
     log(s"Material: ${matV.artifact.base}")
@@ -134,7 +134,7 @@ object Layer {
     val intelligible  = mAttr.$[BooleanObj](attrIntel).fold(c.defaultIntelligible)(_.value)
     val complete      = mAttr.$[BooleanObj]("K" ).fold(c.defaultComplete    )(_.value)
     val sequential    = mAttr.$[BooleanObj]("H" ).fold(c.defaultSequential  )(_.value)
-    val transformable = false // XXX TODO !sequential // this is currently synonymous
+    val transformable = !sequential // this is currently synonymous
     val transform     = transformable && {
       val prob = if (c.isText) config.probTransformText else config.probTransformSound
       prob.coin()
@@ -181,7 +181,11 @@ object Layer {
     )
 
     if (transform) {
-      ???
+      if (c.isText) {
+        putTransformedText()
+      } else {
+        putTransformedSound()
+      }
     } else {
       if (c.isText) {
         putPlainText()
@@ -194,6 +198,14 @@ object Layer {
       val seed1 = rnd.nextLong()
       seed0.update(seed1)
     }
+  }
+
+  def putTransformedText[S <: Sys[S]]()(implicit tx: S#Tx, ctx: Context[S], config: Config): Unit = {
+    import ctx._
+  }
+
+  def putTransformedSound[S <: Sys[S]]()(implicit tx: S#Tx, ctx: Context[S], config: Config): Unit = {
+    import ctx._
   }
 
   def putPlainText[S <: Sys[S]]()(implicit tx: S#Tx, ctx: Context[S], config: Config): Unit = {
@@ -216,7 +228,7 @@ object Layer {
 
      */
 
-    if (true /* XXX TODO */ || complete || !(rnd.nextDouble() < config.probShorten) ) {
+    if (complete || !(rnd.nextDouble() < config.probShorten) ) {
       putPlainTextFull()
     } else {  // shortened
       if (rnd.nextDouble() < config.probShortenFade) {
@@ -252,7 +264,7 @@ object Layer {
     // - frequency filter (indeed that could be the "negative
     //   of the foreground")
 
-    if (true /* XXX TODO */ || ctx.intelligible) {
+    if (ctx.intelligible) {
       putPlainTextFullIntel()
     } else {
       ???
