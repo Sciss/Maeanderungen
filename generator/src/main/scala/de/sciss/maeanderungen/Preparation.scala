@@ -28,7 +28,7 @@ import de.sciss.synth.proc.{AudioCue, Color, GenContext, TimeRef, Timeline, Work
 import de.sciss.synth.{io, proc}
 
 object Preparation {
-  val DEFAULT_VERSION = 11
+  val DEFAULT_VERSION = 12
 
   def process[S <: Sys[S]]()(implicit tx: S#Tx, workspace: Workspace[S]): Unit = {
     val r             = workspace.root
@@ -97,13 +97,13 @@ object Preparation {
       // write
       val writtenLoud   = AudioFileOut("loud"   , loud , sampleRate = srLoud  )
       val writtenPitch  = AudioFileOut("pitch"  , pitch, sampleRate = srPitch )
-      val writtenSpans  = AudioFileOut("pauses" , spans)
-      val writtenAll    = writtenLoud ++ writtenPitch ++ writtenSpans
+      /* val writtenSpans  = */ AudioFileOut("pauses" , spans)
+      // val writtenAll    = writtenLoud ++ writtenPitch ++ writtenSpans
 
       Progress(writtenLoud  / framesLoud  , Metro(srLoud  ), "loudness")
       Progress(writtenPitch / framesPitch , Metro(srPitch ), "pitch"   )
 
-      Action(Done(writtenAll), "done")
+      // Action(Done(writtenAll), "done")
     }
     f
   }
@@ -146,13 +146,24 @@ object Preparation {
         aFsc.put("pauses" , artPauses )
         aFsc.put("is-male", BooleanObj.newConst(isMale))
 
-        if (!hasPauses) {
-          implicit val gen: GenContext[S] = GenContext[S]
-          fsc.run()
-        } else {
+        def done()(implicit tx: S#Tx): Unit = {
           val actDone   = self.attr.![Action]("done")
           val uDone     = Action.Universe(actDone, workspace, invoker = Some(fsc))
           actDone.execute(uDone)
+        }
+
+        if (!hasPauses) {
+          implicit val gen: GenContext[S] = GenContext[S]
+          val r = fsc.run()
+          r.reactNow { implicit tx => state =>
+            if (state.isComplete) {
+              r.result.get.get
+              done()
+            }
+          }
+
+        } else {
+          done()
         }
       }
     }
@@ -203,7 +214,7 @@ object Preparation {
       //----crop
       println("----ACTION DONE")
 
-      try {
+      val shouldIter: Boolean = try {
         val Some(fsc: FScape[S]) = invoker  // self.attr.![FScape]("fsc")
         val cue       = fsc.attr.![AudioCue.Obj]("in")
         val ca        = cue.attr
@@ -346,7 +357,9 @@ object Preparation {
         }
 
         // ----
-        println(s"Analysis done for ${cue.value.artifact.name}")
+        val name = cue.value.artifact.name
+        println(s"Analysis done for $name")
+        !name.contains("Trns")
 
       } catch {
         case scala.util.control.NonFatal(ex) =>
@@ -354,9 +367,11 @@ object Preparation {
           throw ex
       }
 
-      val actIter = root.![Folder]("analysis").![Action]("find-pauses")
-      val uIter   = Action.Universe(actIter, workspace)
-      actIter.execute(uIter)
+      if (shouldIter) {
+        val actIter = root.![Folder]("analysis").![Action]("find-pauses")
+        val uIter   = Action.Universe(actIter, workspace)
+        actIter.execute(uIter)
+      }
     }
 
     val act = wrapAction(act0)

@@ -11,16 +11,17 @@ import scala.concurrent.duration.Duration
 object TransformTextTest extends App {
 //  val fIn     = file("/data/projects/Maeanderungen/audio_work/edited/MT-13_HH_T152.wav")
 //  val fIn     = file("/data/projects/Maeanderungen/audio_work/edited/CN_7_HH_T046.wav")
-  val fIn     = file("/data/projects/Maeanderungen/audio_work/edited/HB_1_HH_T168.aif")
+  val fIn     = file("/data/projects/Maeanderungen/audio_work/edited/CN_1_RH_T014.wav")
+//  val fIn     = file("/data/projects/Maeanderungen/audio_work/edited/HB_1_HH_T168.aif")
   val fOut    = file("/data/temp/text-transform-test.aif")
   val specIn  = AudioFile.readSpec(fIn)
   import specIn.sampleRate
 
   def transformNoPitch(): Graph = Graph {
-    val isMale              = true
-    val MinimumPitch        = if (isMale)  60.0 else 100.0 // 100.0
-    val MaximumPitch        = if (isMale) 200.0 else 320.0 // 1000.0
-    val VoicingThreshold    = 0.45
+//    val isMale              = true
+    val MinimumPitch        = 60.0  // if (isMale)  60.0 else 100.0 // 100.0
+    val MaximumPitch        = 320.0 // if (isMale) 200.0 else 320.0 // 1000.0
+    val VoicingThreshold    = 0.6  // 0.45
     val SilenceThreshold    = 0.03
     val OctaveCost          = 0.01
     val OctaveJumpCost      = 0.35

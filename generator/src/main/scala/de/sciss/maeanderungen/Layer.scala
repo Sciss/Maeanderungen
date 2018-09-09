@@ -18,7 +18,7 @@ import java.util.Locale
 
 import de.sciss.equal.Implicits._
 import de.sciss.file._
-import de.sciss.kollflitz.Vec
+import de.sciss.kollflitz.{ISeq, Vec}
 import de.sciss.lucre.bitemp.BiGroup
 import de.sciss.lucre.expr.{BooleanObj, DoubleObj, IntObj, LongObj}
 import de.sciss.lucre.stm.{Cursor, Folder, Random, Sys, TxnRandom}
@@ -28,8 +28,9 @@ import de.sciss.maeanderungen.Ops._
 import de.sciss.mellite.gui.ObjView
 import de.sciss.numbers.Implicits._
 import de.sciss.span.Span
+import de.sciss.synth.Curve
 import de.sciss.synth.proc.Implicits._
-import de.sciss.synth.proc.{AudioCue, Proc, TimeRef, Timeline, Workspace}
+import de.sciss.synth.proc.{AudioCue, FadeSpec, Proc, TimeRef, Timeline, Workspace}
 
 import scala.annotation.tailrec
 
@@ -44,7 +45,8 @@ object Layer {
 
   final case class Pause(span: Span, break: Boolean)
 
-  final case class RegionAt(frame: Long, span: Span, pause: Option[Pause])
+  final case class RegionAt(frame: Long, span: Span, pause: Option[Pause],
+                            fadeIn: FadeSpec = FadeSpec(0L), fadeOut: FadeSpec = FadeSpec(0L))
 
   final case class PlacedRegion(posTL: Long, region: RegionAt, relativeGain: Double = 1.0)
 
@@ -64,7 +66,7 @@ object Layer {
                                     val pTape2        : Proc[S],
                                     val pMain         : Proc[S],
     )(
-      implicit val rnd: Random[S#Tx], val cursor: Cursor[S]
+      implicit val rnd: Random[S#Tx], val workspace: Workspace[S], val cursor: Cursor[S]
     )
 
   def log(what: => String): Unit =
@@ -116,13 +118,17 @@ object Layer {
 
     val numFrames = (durObj.value * TimeRef.SampleRate).toLong
     val c         = {
-      val isText = config.textSoundRatio.coin()
+      val rat     = config.textSoundRatio
+      val prob    = rat / (rat + 1.0)
+      val isText  = prob.coin()
       if (isText) Category.chooseText() else Category.chooseSound()
     }
+    log(s"Category: $c")
+
     val fMat      = root.![Folder]("material")
 
     val catMat = fMat.iterator.collect {
-      case cue: AudioCue.Obj[S] if cue.name.startsWith(c.abbrev) => cue
+      case cue: AudioCue.Obj[S] if cue.name.contains /* startsWith */(c.abbrev) => cue
     } .toVector
 
     val mat           = catMat.choose()
@@ -202,10 +208,12 @@ object Layer {
 
   def putTransformedText[S <: Sys[S]]()(implicit tx: S#Tx, ctx: Context[S], config: Config): Unit = {
     import ctx._
+    ???
   }
 
   def putTransformedSound[S <: Sys[S]]()(implicit tx: S#Tx, ctx: Context[S], config: Config): Unit = {
     import ctx._
+    ???
   }
 
   def putPlainText[S <: Sys[S]]()(implicit tx: S#Tx, ctx: Context[S], config: Config): Unit = {
@@ -273,52 +281,67 @@ object Layer {
 
   // puts a plain (non-transformed) text in full, retaining intelligibility
   def putPlainTextFullIntel[S <: Sys[S]]()(implicit tx: S#Tx, ctx: Context[S], config: Config): Unit = {
+    val matSpan = Span(0L, ctx.matNumFrames)
+    putPlainTextIntel(matSpan)
+  }
+
+  def executePlacement[S <: Sys[S]](placement: ISeq[PlacedRegion], gain: Double)
+                                   (implicit tx: S#Tx, ctx: Context[S], config: Config): Unit = {
     import ctx._
-    val placementOpt  = tryPlacePlainTextFullIntel[S]()
-    val gainVal       = (65.0 - loud95).dbAmp
-    val intelObj      = BooleanObj.newVar[S](intelligible)
-    val colorVal      = mkColor(ctx.material)
-    placementOpt.foreach { placement =>
-      val vec = placement.toVector
-      for (i <- vec.indices) {
-        val placed = vec(i)
-        val fadeIn = if (i == 0) 0L else {
-          val pred = vec(i - 1)
-          if (placed.posTL === pred.posTL + pred.region.span.length) 0L
-          else {
-            pred.region.pause.fold(0L)(pause => pause.span.length / 2)
-          }
+    val vec       = placement.toVector
+    val intelObj  = BooleanObj.newVar[S](intelligible)
+    val colorVal  = mkColor(material)
+    for (i <- vec.indices) {
+      val placed = vec(i)
+      val fadeIn = if (placed.region.fadeIn.numFrames > 0 || i == 0) placed.region.fadeIn else {
+        val pred = vec(i - 1)
+        val len = if (placed.posTL === pred.posTL + pred.region.span.length) 0L
+        else {
+          pred.region.pause.fold(0L)(pause => pause.span.length / 2)
         }
-        val fadeOut = if (i == vec.size - 1) 0L else {
-          val succ = vec(i + 1)
-          if (placed.posTL + placed.region.span.length === succ.posTL) 0L
-          else {
-            placed.region.pause.fold(0L)(pause => pause.span.length / 2)
-          }
-        }
-        val startTL = placed.posTL - fadeIn
-        // Note: fade-out implies we have a successive pause which is included
-        // in region.span; to avoid plops at the end, we stop after half the
-        // pause when fading; therefore, do not add the fade-out time here
-        val stopTL  = startTL + fadeIn + /* fadeOut + */ placed.region.span.length
-        val gOffset = placed.region.span.start - fadeIn
-        val spanTL  = Span(startTL, stopTL)
-        val (_, pr)  = mkAudioRegion(tl, time = spanTL, audioCue = material, gOffset = gOffset,
-          fadeIn = fadeIn, fadeOut = fadeOut, gain = gainVal)
-        val prAttr = pr.attr
-        prAttr.put(attrIntel, intelObj)
-        prAttr.put(ObjView.attrColor, /* Color.Obj.newVar( */ colorVal /* ) */)
+        FadeSpec(len)
       }
+      val fadeOut = if (placed.region.fadeOut.numFrames > 0 || i == vec.size - 1) placed.region.fadeOut else {
+        val succ = vec(i + 1)
+        val len = if (placed.posTL + placed.region.span.length === succ.posTL) 0L
+        else {
+          placed.region.pause.fold(0L)(pause => pause.span.length / 2)
+        }
+        FadeSpec(len)
+      }
+      val startTL = placed.posTL - fadeIn.numFrames
+      // Note: fade-out implies we have a successive pause which is included
+      // in region.span; to avoid plops at the end, we stop after half the
+      // pause when fading; therefore, do not add the fade-out time here
+      val stopTL  = startTL + fadeIn.numFrames + /* fadeOut.numFrames + */ placed.region.span.length
+      val gOffset = placed.region.span.start - fadeIn.numFrames
+      val spanTL  = Span(startTL, stopTL)
+      val gainVal = gain * placed.relativeGain
+      val (_, pr)  = mkAudioRegion(tl, time = spanTL, audioCue = material, gOffset = gOffset,
+        fadeIn = fadeIn, fadeOut = fadeOut, gain = gainVal)
+      val prAttr = pr.attr
+      prAttr.put(attrIntel, intelObj)
+      prAttr.put(ObjView.attrColor, /* Color.Obj.newVar( */ colorVal /* ) */)
     }
   }
 
     // puts a plain (non-transformed) text in full, retaining intelligibility
-  def tryPlacePlainTextFullIntel[S <: Sys[S]]()(implicit tx: S#Tx, ctx: Context[S],
-                                                config: Config): Option[List[PlacedRegion]] = {
+  def putPlainTextIntel[S <: Sys[S]](matSpan: Span)(implicit tx: S#Tx, ctx: Context[S], config: Config): Unit = {
+    import ctx._
+    val placementOpt  = tryPlacePlainIntel[S](matSpan = matSpan)
+    val gainVal       = (65.0 - loud95).dbAmp
+    placementOpt.foreach { placement =>
+      executePlacement(placement, gain = gainVal)
+    }
+  }
+
+    // puts a plain (non-transformed) object with pauses, retaining intelligibility
+  def tryPlacePlainIntel[S <: Sys[S]](matSpan: Span)(implicit tx: S#Tx, ctx: Context[S],
+                                                     config: Config): Option[List[PlacedRegion]] = {
     import ctx._
 
-    val pos0TLTry = (rnd.nextDouble() * (tlNumFrames - matNumFrames)).toLong
-    val reg0Opt = matRegionAt(0L, includePause = true)
+    val pos0TLTry = (rnd.nextDouble() * (tlNumFrames - matSpan.length)).toLong
+    val reg0Opt = matRegionAt(matSpan.start, includePause = true)
     if (reg0Opt.isEmpty) return None
 
     val reg0 = reg0Opt.get
@@ -349,7 +372,7 @@ object Layer {
           sp.value match {
             case sp: Span =>
               val posNext = sp.stop
-              if (posNext + (matNumFrames - reg.span.start) <= tlNumFrames) findRight(reg, posNext)
+              if (posNext + (matSpan.length - reg.span.start) <= tlNumFrames) findRight(reg, posNext)
               else None
 
             case _ => None
@@ -366,7 +389,7 @@ object Layer {
     var posCurrTL = pos0TL
     placement += PlacedRegion(pos0TL, reg0)
     var currReg   = reg0
-    while (currReg.span.stop < matNumFrames) {
+    while (currReg.span.stop < matSpan.length) {
       val posNextTLTry  = posCurrTL + currReg.span.length
       val nextReg       = matRegionAt(currReg.span.stop + 1, includePause = true).get
       val posNextTLOpt  = findRight(nextReg, posNextTLTry)
@@ -390,10 +413,73 @@ object Layer {
   }
 
   def putPlainTextCut[S <: Sys[S]]()(implicit tx: S#Tx, ctx: Context[S], config: Config): Unit = {
-    ???
+    import ctx._
+    val startPos0     = (rnd.nextDouble() * matNumFrames).toLong
+    val cutLen0       = math.max(TimeRef.SampleRate, rnd.nextDouble() * matNumFrames).toLong
+    val breakPauses   = pauses.filter(_.break)
+    val i             = breakPauses.indexWhere(_.span.start >= startPos0)
+    val startPos      = if (i < 0) 0L else breakPauses(i).span.stop
+    val stopPos0      = startPos + cutLen0
+    val j             = breakPauses.indexWhere(_.span.start >= stopPos0, i + 1)
+    val stopPos       = if (j < 0) matNumFrames - startPos else breakPauses(j).span.start
+    val matSpan = Span(startPos, stopPos)
+    putPlainTextIntel(matSpan)
   }
 
-  def putPlainSound[S <: Sys[S]]()(implicit tx: S#Tx, ctx: Context[S]): Unit = {
-    ???
+  def putPlainSound[S <: Sys[S]]()(implicit tx: S#Tx, ctx: Context[S], config: Config): Unit = {
+    import ctx._
+    if (complete) {
+      putPlainSoundFull[S]()
+    } else {  // shortened
+      putPlainSoundCut()
+    }
+  }
+
+  def putPlainSoundFull[S <: Sys[S]]()(implicit tx: S#Tx, ctx: Context[S], config: Config): Unit = {
+    val matSpan = Span(0L, ctx.matNumFrames)
+    putPlainSoundIntel(matSpan)
+  }
+
+  def putPlainSoundCut[S <: Sys[S]]()(implicit tx: S#Tx, ctx: Context[S], config: Config): Unit = {
+    import ctx._
+    val startPos0     = (rnd.nextDouble() * matNumFrames).toLong
+    val cutLen0       = math.max(TimeRef.SampleRate, rnd.nextDouble() * matNumFrames).toLong
+    val breakPauses   = pauses.filter(_.break)
+    if (breakPauses.nonEmpty && 0.5.coin()) {
+      val i             = breakPauses.indexWhere(_.span.start >= startPos0)
+      val startPos      = if (i < 0) 0L else breakPauses(i).span.stop
+      val stopPos0      = startPos + cutLen0
+      val j             = breakPauses.indexWhere(_.span.start >= stopPos0, i + 1)
+      val stopPos       = if (j < 0) matNumFrames - startPos else breakPauses(j).span.start
+      val matSpan = Span(startPos, stopPos)
+      putPlainTextIntel(matSpan)
+    } else {
+      val gainVal0      = (65.0 - loud95).dbAmp
+      val gainVal       = rnd.nextDouble().linLin(0.0, 1.0, -18.0, 0.0).dbAmp * gainVal0
+      val startPos      = startPos0
+      val stopPos       = startPos + cutLen0
+      val matSpan       = Span(startPos, stopPos)
+      val matDur        = matSpan.length / TimeRef.SampleRate
+      val fadeInS       = rnd.nextDouble().linExp(0.0, 1.0, 1.0, matDur - 1.0)
+      val fadeOutS      = math.min(matDur - fadeInS, rnd.nextDouble().linExp(0.0, 1.0, 1.0, matDur - 1.0))
+      val fadeIn        = FadeSpec((fadeInS  * TimeRef.SampleRate).toLong, Curve.sine)
+      val fadeOut       = FadeSpec((fadeOutS * TimeRef.SampleRate).toLong, Curve.sine)
+      val posTL         = (rnd.nextDouble() * (tlNumFrames - matSpan.length)).toLong
+      val region        = RegionAt(frame = startPos, span = matSpan, pause = None,
+        fadeIn = fadeIn, fadeOut = fadeOut)
+      val placed        = PlacedRegion(posTL = posTL, region = region)
+      val placement     = placed :: Nil
+
+      executePlacement(placement, gain = gainVal)
+    }
+  }
+
+  def putPlainSoundIntel[S <: Sys[S]](matSpan: Span)(implicit tx: S#Tx, ctx: Context[S], config: Config): Unit = {
+    import ctx._
+    val placementOpt  = tryPlacePlainIntel[S](matSpan = matSpan)
+    val gainVal       = (65.0 - loud95).dbAmp // XXX TODO --- we should probably take loud50 into account as well
+    placementOpt.foreach { placement =>
+      executePlacement(placement, gain = gainVal)
+    }
   }
 }

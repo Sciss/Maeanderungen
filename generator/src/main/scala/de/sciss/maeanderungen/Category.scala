@@ -102,12 +102,44 @@ object Category {
     val defaultComplete     = false
   }
 
+  case object FieldRecording extends Sound {
+    val name                = "Field recording"
+    val abbrev              = "FR"
+    val defaultIntelligible = false
+    val defaultSequential   = false
+    val defaultComplete     = false
+  }
+
+  case object InductionCoil extends Sound {
+    val name                = "Induktionsspule"
+    val abbrev              = "IS"
+    val defaultIntelligible = false
+    val defaultSequential   = false
+    val defaultComplete     = false
+  }
+
+  case object Piezo extends Sound {
+    val name                = "Piezo"
+    val abbrev              = "PZ"
+    val defaultIntelligible = false
+    val defaultSequential   = false
+    val defaultComplete     = false
+  }
+
+  case object GeigerCounter extends Sound {
+    val name                = "Geigerzähler"
+    val abbrev              = "GZ"
+    val defaultIntelligible = false
+    val defaultSequential   = false
+    val defaultComplete     = false
+  }
+
   val text: Vec[Text] = Vec(
     GettingLost, CountingTrees, SkyObservations, ChaoticEnumerations, Acrostics, PoeticManuals, MetaText
   )
 
   val sound: Vec[Sound] = Vec(
-    HybridSound
+    HybridSound, FieldRecording, InductionCoil, Piezo, GeigerCounter
   )
 
   val all: Vec[Category] = text ++ sound
@@ -133,7 +165,11 @@ object Category {
   ))
 
   val weightedSound: Vec[(Double, Sound)] = normalizeWeights(Vec(
-    1.0 -> HybridSound
+    1.0 -> HybridSound,
+    1.0 -> FieldRecording,
+    1.0 -> InductionCoil,
+    1.0 -> Piezo,
+    1.0 -> GeigerCounter
   ))
 
 //  val weighted: Vec[(Double, Category)] = normalizeWeights(weightedText ++ weightedSound)
