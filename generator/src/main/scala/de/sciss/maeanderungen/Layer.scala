@@ -325,7 +325,6 @@ object Layer {
 
   def executePlacementAndMask[S <: Sys[S]](placement: ISeq[PlacedRegion], gain: Double)
                                           (implicit tx: S#Tx, ctx: Context[S], config: Config): Unit = {
-    executePlacement[S](placement, gain = gain, target = ctx.tl)
     val tlFg = Timeline[S]
     executePlacement[S](placement, gain = gain, target = tlFg)
     val tlFgSpans = groupWithinProximity(tlFg, maxDistanceSec = 1.0)
@@ -336,9 +335,18 @@ object Layer {
       tlBg.span.nonEmptyOption.foreach { spanW2 =>
         val futBncFg  = bounceTemp[S](tlFg, spanW )
         val futBncBg  = bounceTemp[S](tlBg, spanW2)
+        ???
+
+        /*
+
+          - run masking fsc (with spanW-spanW2 alignment).
+          - replace in ctx.tl (we need map data from copyForReplacementBounce)
+
+         */
       }
       ???
     }
+    executePlacement[S](placement, gain = gain, target = ctx.tl)
   }
 
   def executePlacement[S <: Sys[S]](placement: ISeq[PlacedRegion], gain: Double, target: Timeline.Modifiable[S])
