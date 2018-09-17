@@ -15,17 +15,26 @@ package de.sciss.maeanderungen
 
 import de.sciss.equal.Implicits._
 import de.sciss.file._
+import de.sciss.kollflitz.Vec
 import de.sciss.lucre.bitemp.BiGroup
 import de.sciss.lucre.expr.{BooleanObj, DoubleObj, LongObj, SpanLikeObj}
-import de.sciss.lucre.stm.Sys
+import de.sciss.lucre.stm
+import de.sciss.lucre.stm.Obj
+import de.sciss.lucre.synth.{Server, Sys}
 import de.sciss.maeanderungen.Layer.{Context, RegionAt, attrIntel}
 import de.sciss.maeanderungen.Ops._
+import de.sciss.mellite.ProcActions
+import de.sciss.mellite.gui.ActionBounceTimeline
 import de.sciss.mellite.gui.edit.Edits
 import de.sciss.span.Span
 import de.sciss.synth
-import de.sciss.synth.proc.{AudioCue, Code, Color, FadeSpec, ObjKeys, Proc, Timeline}
-import de.sciss.synth.{Curve, SynthGraph, proc}
+import de.sciss.synth.io.SampleFormat
 import de.sciss.synth.proc.Implicits._
+import de.sciss.synth.proc.{AudioCue, Code, Color, FadeSpec, ObjKeys, Proc, TimeRef, Timeline}
+import de.sciss.synth.{SynthGraph, proc}
+
+import scala.concurrent.{Future, Promise}
+import scala.util.control.NonFatal
 
 object LayerUtil {
   def any2stringadd: Any = ()
@@ -225,5 +234,148 @@ object LayerUtil {
     p.attr.put(Proc.attrSource, Code.Obj.newVar(Code.SynthGraph(source)))
 
     p
+  }
+
+  def copyForReplacementBounce[S <: Sys[S]](tl: Timeline[S], span: Span)(implicit tx: S#Tx, cursor: stm.Cursor[S]): Timeline[S] = {
+    val res       = Timeline[S]
+    val global    = tl.globalObjects.collect { case p: Proc[S] => p } .toList
+    var globalMap = Map.empty[Proc[S], Proc[S]]
+
+    tl.intersect(span).foreach {
+      case (eSpan @ Span(start, stop), entries) =>
+        entries.foreach { entry =>
+          var sect      = eSpan.intersect(span).nonEmptyOption.get
+          val obj       = entry.value
+          val fdIn      = obj.attr.$[FadeSpec.Obj](ObjKeys.attrFadeIn ).fold(0L)(_.value.numFrames)
+          val fdOut     = obj.attr.$[FadeSpec.Obj](ObjKeys.attrFadeOut).fold(0L)(_.value.numFrames)
+          val fdInSpan  = Span(start, start + fdIn)
+          val fdOutSpan = Span(stop - fdOut, stop)
+          val fdInSect  = span.intersect(fdInSpan).length
+          if (fdInSect > 0 && fdInSect < fdIn) {
+            sect = sect.union(fdInSpan)
+          }
+          val fdOutSect = span.intersect(fdOutSpan).length
+          if (fdOutSect > 0 && fdOutSect < fdOut) {
+            sect = sect.union(fdOutSpan)
+          }
+
+          val (spanOut, objOut) = if (sect == eSpan) {  // copy entire object
+            val objC  = ProcActions.copy(obj)
+            val spanC = SpanLikeObj.newVar[S](eSpan)
+            (spanC, objC)
+
+          } else {  // split
+            var objC  = obj
+            var spanC = entry.span
+
+            if (sect.start > eSpan.start) {
+              val (_, _, rightSpan, rightObj) = splitCopyObject(sect.start, spanC, objC)
+              spanC = rightSpan
+              objC  = rightObj
+            }
+            if (sect.stop < eSpan.stop) {
+              val (leftSpan, leftObj, _, _) = splitCopyObject(sect.stop, spanC, objC)
+              spanC = leftSpan
+              objC = leftObj
+            }
+            assert(objC != obj)
+
+            (spanC, objC)
+          }
+
+          res.add(spanOut, objOut)
+
+          (obj, objOut) match {
+            case (objP: Proc[S], objOutP: Proc[S]) =>
+              global.foreach { objIn =>
+                Edits.findLink(out = objP, in = objIn).foreach { lnk =>
+                  val out = objOutP.outputs.add(lnk.source.key)
+                  val glob = globalMap.getOrElse(lnk.sink, {
+                    val cpy = ProcActions.copy(lnk.sink).asInstanceOf[Proc[S]]
+                    globalMap += lnk.sink -> cpy
+                    res.add(Span.All, cpy)
+                    cpy
+                  })
+                  Edits.addLink(out, glob, lnk.key)
+                }
+              }
+
+            case _ =>
+          }
+        }
+
+      case _ =>    // global proc
+    }
+
+    res
+  }
+
+  def splitCopyObject[S <: Sys[S]](time: Long, oldSpan: SpanLikeObj[S], obj: Obj[S])
+                                  (implicit tx: S#Tx): (SpanLikeObj.Var[S], Obj[S], SpanLikeObj.Var[S], Obj[S]) = {
+    val leftObj   = ProcActions.copy[S](obj, connectInput = true)
+    val rightObj  = ProcActions.copy[S](obj, connectInput = true)
+    leftObj .attr.remove(ObjKeys.attrFadeOut)
+    rightObj.attr.remove(ObjKeys.attrFadeIn )
+
+    val oldVal    = oldSpan.value
+    val rightSpan = oldVal match {
+      case Span.HasStart(leftStart) =>
+        val _rightSpan  = SpanLikeObj.newVar(oldVal)
+        val resize      = ProcActions.Resize(time - leftStart, 0L)
+        val minStart    = 0L // timelineModel.bounds.start
+        ProcActions.resize(_rightSpan, rightObj, resize, minStart = minStart)
+        _rightSpan
+
+      case Span.HasStop(rightStop) =>
+        SpanLikeObj.newVar[S](Span(time, rightStop))
+    }
+
+    val leftSpan = oldVal match {
+      case Span.HasStop(rightStop) =>
+        val _leftSpan = SpanLikeObj.newVar(oldVal)
+        val minStart  = 0L // timelineModel.bounds.start
+        val resize    = ProcActions.Resize(0L, time - rightStop)
+        ProcActions.resize(_leftSpan, leftObj, resize, minStart = minStart)
+        _leftSpan
+
+      case Span.HasStart(leftStart) =>
+        SpanLikeObj.newVar[S](Span(leftStart, time))
+    }
+
+    (leftSpan, leftObj, rightSpan, rightObj)
+  }
+
+  def widen(span: Span, durSec: Double): Span = {
+    val frames = (durSec * TimeRef.SampleRate).toLong
+    Span(span.start - frames, span.stop + frames)
+  }
+
+  def tryCompleteWith[A](p: Promise[A])(body: => Future[A]): Unit =
+    try {
+      val fut = body
+      p.tryCompleteWith(fut)
+    } catch {
+      case NonFatal(ex) =>
+        p.tryFailure(ex)
+    }
+
+  def bounceTemp[S <: Sys[S]](tl: Timeline[S], span: Span)
+                             (implicit tx: S#Tx, ctx: Context[S], config: Config): Future[File] = {
+    val p = Promise[File]
+    val tlH                 = tx.newHandle(tl)
+    val sCfg                = Server.Config()
+    sCfg.outputBusChannels  = config.numChannels
+    sCfg.inputBusChannels   = 0
+    tx.afterCommit {
+      import ctx.cursor
+      val fTmp            = File.createTemp(suffix = ".aif")
+      sCfg.nrtOutputPath  = fTmp.path
+      val settings        = ActionBounceTimeline.PerformSettings[S](
+        realtime = false, fileFormat = ActionBounceTimeline.FileFormat.PCM(sampleFormat = SampleFormat.Float),
+        group = tlH :: Nil, server = sCfg, span = span, channels = Vec(0 to (config.numChannels - 1))
+      )
+      tryCompleteWith(p)(ActionBounceTimeline.perform(ctx.workspace, settings))
+    }
+    p.future
   }
 }

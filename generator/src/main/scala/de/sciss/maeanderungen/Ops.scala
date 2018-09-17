@@ -17,6 +17,7 @@ import de.sciss.kollflitz.Vec
 import de.sciss.lucre.bitemp.BiGroup
 import de.sciss.lucre.stm.{Obj, Random, Sys, TxnLike}
 import de.sciss.span.Span
+import de.sciss.span.Span.SpanOrVoid
 import de.sciss.synth.proc.Timeline
 
 object Ops {
@@ -52,5 +53,12 @@ object Ops {
     def globalObjects(implicit tx: S#Tx): Iterator[Obj[S]] =
       tl.rangeSearch(Span.Until(BiGroup.MinCoordinate + 1), Span.From(BiGroup.MaxCoordinate - 1))
         .flatMap(_._2.map(_.value))
+
+    def span(implicit tx: S#Tx): SpanOrVoid = {
+      (tl.firstEvent, tl.lastEvent) match {
+        case (Some(start), Some(stop)) => Span(start, stop)
+        case _ => Span.Void
+      }
+    }
   }
 }

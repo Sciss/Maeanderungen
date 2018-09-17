@@ -18,7 +18,7 @@ import de.sciss.fscape.graph._
 import de.sciss.fscape.{Graph, stream}
 import de.sciss.lucre.artifact.{Artifact, ArtifactLocation}
 import de.sciss.lucre.stm
-import de.sciss.lucre.stm.Sys
+import de.sciss.lucre.synth.Sys
 import de.sciss.maeanderungen.Layer.Context
 import de.sciss.synth.io.{AudioFile, AudioFileSpec}
 import de.sciss.synth.proc.Implicits._

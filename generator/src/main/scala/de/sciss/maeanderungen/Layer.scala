@@ -20,19 +20,27 @@ import de.sciss.equal.Implicits._
 import de.sciss.file._
 import de.sciss.kollflitz.{ISeq, Vec}
 import de.sciss.lucre.bitemp.BiGroup
-import de.sciss.lucre.expr.{BooleanObj, DoubleObj, IntObj, LongObj}
-import de.sciss.lucre.stm.{Cursor, Folder, Random, Sys, TxnRandom}
+import de.sciss.lucre.expr.{BooleanObj, DoubleObj, IntObj, LongObj, SpanLikeObj}
+import de.sciss.lucre.stm.{Cursor, Folder, Obj, Random, TxnRandom}
+import de.sciss.lucre.swing.edit.EditVar
+import de.sciss.lucre.synth.{Server, Sys}
 import de.sciss.maeanderungen.Builder._
 import de.sciss.maeanderungen.LayerUtil._
 import de.sciss.maeanderungen.Ops._
-import de.sciss.mellite.gui.ObjView
+import de.sciss.mellite.ProcActions
+import de.sciss.mellite.gui.edit.{EditAttrMap, EditTimelineInsertObj, Edits}
+import de.sciss.mellite.gui.{ActionBounceTimeline, ObjView}
 import de.sciss.numbers.Implicits._
-import de.sciss.span.Span
-import de.sciss.synth.Curve
+import de.sciss.span.{Span, SpanLike}
+import de.sciss.synth.{Curve, proc}
+import de.sciss.synth.io.SampleFormat
 import de.sciss.synth.proc.Implicits._
-import de.sciss.synth.proc.{AudioCue, FadeSpec, Proc, TimeRef, Timeline, Workspace}
+import de.sciss.synth.proc.{AudioCue, FadeSpec, ObjKeys, Proc, TimeRef, Timeline, Workspace}
+import javax.swing.undo.UndoableEdit
 
 import scala.annotation.tailrec
+import scala.concurrent.{Future, Promise}
+import scala.util.control.NonFatal
 
 object Layer {
   final val DEFAULT_VERSION = 1
@@ -85,7 +93,7 @@ object Layer {
     } .toList.lastOption
 
     val tl: Timeline.Modifiable[S] = tlOpt.getOrElse {
-      val _tl   = Timeline[S]
+      val _tl     = Timeline[S]
       addDefaultGlobalProc(_tl)
       val format  = new SimpleDateFormat("'Rendering-'yyMMdd'_'HHmmss", Locale.US)
       _tl.name    = format.format(new java.util.Date(now))
@@ -137,9 +145,9 @@ object Layer {
     log(s"Material: ${matV.artifact.base}")
 
     val mAttr         = mat.attr
-    val intelligible  = mAttr.$[BooleanObj](attrIntel).fold(c.defaultIntelligible)(_.value)
-    val complete      = mAttr.$[BooleanObj]("K" ).fold(c.defaultComplete    )(_.value)
-    val sequential    = mAttr.$[BooleanObj]("H" ).fold(c.defaultSequential  )(_.value)
+    val intelligible  = mAttr.$[BooleanObj](attrIntel ).fold(c.defaultIntelligible)(_.value)
+    val complete      = mAttr.$[BooleanObj]("K"       ).fold(c.defaultComplete    )(_.value)
+    val sequential    = mAttr.$[BooleanObj]("H"       ).fold(c.defaultSequential  )(_.value)
     val transformable = !sequential // this is currently synonymous
     val transform     = transformable && {
       val prob = if (c.isText) config.probTransformText else config.probTransformSound
@@ -285,7 +293,55 @@ object Layer {
     putPlainTextIntel(matSpan)
   }
 
-  def executePlacement[S <: Sys[S]](placement: ISeq[PlacedRegion], gain: Double)
+  def groupWithinProximity[S <: Sys[S]](tl: Timeline[S], maxDistanceSec: Double)
+                                       (implicit tx: S#Tx): Vec[Span] = {
+    val b           = Vec.newBuilder[Span]
+    val maxDistFr   = (maxDistanceSec * TimeRef.SampleRate).toLong
+    var current     = Span.Void: Span.SpanOrVoid
+
+    def flush(): Unit =
+      current.nonEmptyOption.foreach(b += _)
+
+    tl.iterator.foreach {
+      case (sp: Span, _) =>
+        current match {
+          case Span.Void =>
+            current = sp
+          case sp2: Span =>
+            if (sp2.shift(maxDistFr).touches(sp)) {
+              current = sp union sp2
+            } else {
+              flush()
+              current = sp
+            }
+        }
+
+      case _ =>
+    }
+
+    flush()
+    b.result()
+  }
+
+  def executePlacementAndMask[S <: Sys[S]](placement: ISeq[PlacedRegion], gain: Double)
+                                          (implicit tx: S#Tx, ctx: Context[S], config: Config): Unit = {
+    executePlacement[S](placement, gain = gain, target = ctx.tl)
+    val tlFg = Timeline[S]
+    executePlacement[S](placement, gain = gain, target = tlFg)
+    val tlFgSpans = groupWithinProximity(tlFg, maxDistanceSec = 1.0)
+    tlFgSpans.foreach { tlFgSpan =>
+      import ctx.cursor
+      val spanW     = widen(tlFgSpan, durSec = 0.5)
+      val tlBg      = copyForReplacementBounce(ctx.tl, spanW)
+      tlBg.span.nonEmptyOption.foreach { spanW2 =>
+        val futBncFg  = bounceTemp[S](tlFg, spanW )
+        val futBncBg  = bounceTemp[S](tlBg, spanW2)
+      }
+      ???
+    }
+  }
+
+  def executePlacement[S <: Sys[S]](placement: ISeq[PlacedRegion], gain: Double, target: Timeline.Modifiable[S])
                                    (implicit tx: S#Tx, ctx: Context[S], config: Config): Unit = {
     import ctx._
     val vec       = placement.toVector
@@ -317,7 +373,7 @@ object Layer {
       val gOffset = placed.region.span.start - fadeIn.numFrames
       val spanTL  = Span(startTL, stopTL)
       val gainVal = gain * placed.relativeGain
-      val (_, pr)  = mkAudioRegion(tl, time = spanTL, audioCue = material, gOffset = gOffset,
+      val (_, pr)  = mkAudioRegion(target, time = spanTL, audioCue = material, gOffset = gOffset,
         fadeIn = fadeIn, fadeOut = fadeOut, gain = gainVal)
       val prAttr = pr.attr
       prAttr.put(attrIntel, intelObj)
@@ -331,7 +387,7 @@ object Layer {
     val placementOpt  = tryPlacePlainIntel[S](matSpan = matSpan)
     val gainVal       = (65.0 - loud95).dbAmp
     placementOpt.foreach { placement =>
-      executePlacement(placement, gain = gainVal)
+      executePlacementAndMask(placement, gain = gainVal)
     }
   }
 
@@ -470,7 +526,7 @@ object Layer {
       val placed        = PlacedRegion(posTL = posTL, region = region)
       val placement     = placed :: Nil
 
-      executePlacement(placement, gain = gainVal)
+      executePlacementAndMask(placement, gain = gainVal)
     }
   }
 
@@ -479,7 +535,7 @@ object Layer {
     val placementOpt  = tryPlacePlainIntel[S](matSpan = matSpan)
     val gainVal       = (65.0 - loud95).dbAmp // XXX TODO --- we should probably take loud50 into account as well
     placementOpt.foreach { placement =>
-      executePlacement(placement, gain = gainVal)
+      executePlacementAndMask(placement, gain = gainVal)
     }
   }
 }
