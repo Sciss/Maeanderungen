@@ -18,7 +18,8 @@ import de.sciss.fscape.lucre.FScape
 import de.sciss.fscape.lucre.MacroImplicits.FScapeMacroOps
 import de.sciss.lucre.artifact.{Artifact, ArtifactLocation}
 import de.sciss.lucre.expr.{BooleanObj, DoubleObj, IntObj, SpanLikeObj}
-import de.sciss.lucre.stm.{Folder, Sys}
+import de.sciss.lucre.stm.Folder
+import de.sciss.lucre.synth.Sys
 import de.sciss.maeanderungen.Builder._
 import de.sciss.span.Span
 import de.sciss.synth.proc.Action.attrSource

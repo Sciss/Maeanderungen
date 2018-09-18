@@ -16,6 +16,7 @@ package de.sciss.maeanderungen
 import de.sciss.equal.Implicits._
 import de.sciss.file._
 import de.sciss.kollflitz.Vec
+import de.sciss.lucre.artifact.{Artifact, ArtifactLocation}
 import de.sciss.lucre.bitemp.BiGroup
 import de.sciss.lucre.expr.{BooleanObj, DoubleObj, LongObj, SpanLikeObj}
 import de.sciss.lucre.stm
@@ -28,9 +29,9 @@ import de.sciss.mellite.gui.ActionBounceTimeline
 import de.sciss.mellite.gui.edit.Edits
 import de.sciss.span.Span
 import de.sciss.synth
-import de.sciss.synth.io.SampleFormat
+import de.sciss.synth.io.{AudioFile, SampleFormat}
 import de.sciss.synth.proc.Implicits._
-import de.sciss.synth.proc.{AudioCue, Code, Color, FadeSpec, ObjKeys, Proc, TimeRef, Timeline}
+import de.sciss.synth.proc.{AudioCue, Code, Color, FadeSpec, ObjKeys, Proc, SoundProcesses, TimeRef, Timeline}
 import de.sciss.synth.{SynthGraph, proc}
 
 import scala.concurrent.{Future, Promise}
@@ -238,13 +239,17 @@ object LayerUtil {
     p
   }
 
+  case class Replacement[S <: Sys[S]](nameBg: String, tlBg: Timeline.Modifiable[S],
+                                      map: Map[BiGroup.Entry[S, Obj[S]], List[(SpanLikeObj[S], Obj[S])]])
+
   def copyForReplacementBounce[S <: Sys[S]](tl: Timeline[S], span: Span)
-                                           (implicit tx: S#Tx, cursor: stm.Cursor[S]): (String, Timeline[S]) = {
-    val res       = Timeline[S]
-    val global    = tl.globalObjects.collect { case p: Proc[S] => p } .toList
-    var globalMap = Map.empty[Proc[S], Proc[S]]
-    var name      = "unknown"
-    var nameSpan  = Span(0, 0)
+                                           (implicit tx: S#Tx, cursor: stm.Cursor[S]): Replacement[S] = {
+    val res         = Timeline[S]
+    val global      = tl.globalObjects.collect { case p: Proc[S] => p } .toList
+    var globalMap   = Map.empty[Proc[S], Proc[S]]
+    var name        = "unknown"   // we collect the name of the longest region, representing the background
+    var nameSpan    = Span(0, 0)
+    var replaceMap  = Map.empty[BiGroup.Entry[S, Obj[S]], List[(SpanLikeObj[S], Obj[S])]]
 
     tl.intersect(span).foreach {
       case (eSpan @ Span(start, stop), entries) =>
@@ -267,6 +272,7 @@ object LayerUtil {
           val (spanOut, objOut) = if (sect == eSpan) {  // copy entire object
             val objC  = ProcActions.copy(obj)
             val spanC = SpanLikeObj.newVar[S](eSpan)
+            replaceMap += entry -> Nil
             (spanC, objC)
 
           } else {  // split
@@ -274,12 +280,18 @@ object LayerUtil {
             var spanC = entry.span
 
             if (sect.start > eSpan.start) {
-              val (_, _, rightSpan, rightObj) = splitCopyObject(sect.start, spanC, objC)
+              val (leftSpan, leftObj, rightSpan, rightObj) = splitCopyObject(sect.start, spanC, objC)
+              val rpl0 = replaceMap.getOrElse(entry, Nil)
+              val rpl1 = (leftSpan, leftObj) :: rpl0
+              replaceMap += entry -> rpl1
               spanC = rightSpan
               objC  = rightObj
             }
             if (sect.stop < eSpan.stop) {
-              val (leftSpan, leftObj, _, _) = splitCopyObject(sect.stop, spanC, objC)
+              val (leftSpan, leftObj, rightSpan, rightObj) = splitCopyObject(sect.stop, spanC, objC)
+              val rpl0 = replaceMap.getOrElse(entry, Nil)
+              val rpl1 = (rightSpan, rightObj) :: rpl0
+              replaceMap += entry -> rpl1
               spanC = leftSpan
               objC = leftObj
             }
@@ -318,7 +330,7 @@ object LayerUtil {
       case _ =>    // global proc
     }
 
-    (name, res)
+    Replacement(name, res, replaceMap)
   }
 
   def splitCopyObject[S <: Sys[S]](time: Long, oldSpan: SpanLikeObj[S], obj: Obj[S])
@@ -391,5 +403,53 @@ object LayerUtil {
       tryCompleteWith(p)(ActionBounceTimeline.perform(ctx.workspace, settings))
     }
     p.future
+  }
+
+  type CueSource[S <: Sys[S]] = stm.Source[S#Tx, AudioCue.Obj[S]]
+  type FutCue   [S <: Sys[S]] = Future[CueSource[S]]
+
+  def mkTransform[S <: Sys[S]](nameOut: String)(run: File => Future[Unit])
+                              (implicit tx: S#Tx, ctx: Context[S]): FutCue[S] = {
+    mkTransformOrRender[S](folderName = "transform", nameOut = nameOut, unique = false)(run)
+  }
+
+  def mkRender[S <: Sys[S]](nameOut: String)(run: File => Future[Unit])
+                           (implicit tx: S#Tx, ctx: Context[S]): FutCue[S] = {
+    mkTransformOrRender[S](folderName = "render", nameOut = nameOut, unique = true)(run)
+  }
+
+  private def mkTransformOrRender[S <: Sys[S]](folderName: String, nameOut: String, unique: Boolean)
+                                              (run: File => Future[Unit])
+                                              (implicit tx: S#Tx, ctx: Context[S]): FutCue[S] = {
+    import SoundProcesses.executionContext
+    import ctx.{workspace, cursor}
+    val root      = workspace.root
+    val folderOut = Builder.mkFolder(root, folderName)
+    val loc       = root.![ArtifactLocation]("base")
+    val dirOut    = loc.directory / "audio_work" / folderName
+    dirOut.mkdirs()
+    val fOut0     = dirOut / nameOut
+    val fOut      = if (unique) Util.mkUnique(fOut0) else fOut0
+    val artOut    = Artifact(loc, fOut)
+
+    def done()(implicit tx: S#Tx): Future[stm.Source[S#Tx, AudioCue.Obj[S]]] = {
+      val spec  = AudioFile.readSpec(fOut)
+      val cue   = AudioCue.Obj(artOut, spec, offset = 0L, gain = 1.0)
+      cue.name  = nameOut
+      folderOut.addLast(cue)
+      val cueH  = tx.newHandle(cue)
+      val fut   = Builder.createMetaData[S](cue)
+      fut.map(_ => cueH)
+    }
+
+    if (fOut.isFile) {
+      done()
+
+    } else {
+      val fut = run(fOut)
+      Builder.flatMapTx[S, Unit, CueSource[S]](fut) { implicit tx => _ =>
+        done()
+      }
+    }
   }
 }

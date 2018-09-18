@@ -16,13 +16,11 @@ package de.sciss.maeanderungen
 import de.sciss.file._
 import de.sciss.fscape.graph._
 import de.sciss.fscape.{Graph, stream}
-import de.sciss.lucre.artifact.{Artifact, ArtifactLocation}
 import de.sciss.lucre.stm
 import de.sciss.lucre.synth.Sys
 import de.sciss.maeanderungen.Layer.Context
 import de.sciss.synth.io.{AudioFile, AudioFileSpec}
-import de.sciss.synth.proc.Implicits._
-import de.sciss.synth.proc.{AudioCue, SoundProcesses}
+import de.sciss.synth.proc.AudioCue
 
 import scala.concurrent.{Future, Promise}
 import scala.util.control.NonFatal
@@ -30,40 +28,13 @@ import scala.util.control.NonFatal
 object TextTransforms {
   final val DEFAULT_VERSION = 1
 
-  def removePitch[S <: Sys[S]]()(implicit tx: S#Tx, ctx: Context[S]): Future[stm.Source[S#Tx, AudioCue.Obj[S]]] = {
-    import SoundProcesses.executionContext
+  def mkRemovePitch[S <: Sys[S]]()(implicit tx: S#Tx, ctx: Context[S]): Future[stm.Source[S#Tx, AudioCue.Obj[S]]] = {
     import ctx._
     val matVal    = material.value
     val base      = matVal.artifact.base
-    val root      = workspace.root
-    val fTrans    = Builder.mkFolder(root, "transform")
     val nameOut   = s"$base-Trns-No-Pitch.aif"
-    val loc       = root.![ArtifactLocation]("base")
-    val dirTrans  = loc.directory / "transform"
-    val fOut      = dirTrans / nameOut
-    dirTrans.mkdirs()
-    val artOut    = Artifact(loc, fOut)
-
-    def done()(implicit tx: S#Tx): Future[stm.Source[S#Tx, AudioCue.Obj[S]]] = {
-      val spec  = AudioFile.readSpec(fOut)
-      val cue   = AudioCue.Obj(artOut, spec, offset = 0L, gain = 1.0)
-      cue.name  = nameOut
-      fTrans.addLast(cue)
-      val cueH  = tx.newHandle(cue)
-      val fut   = Builder.createMetaData[S](cue)
-      fut.map(_ => cueH)
-    }
-
-    if (fOut.isFile) {
-      done()
-
-    } else {
-      val fut = runRemovePitch(fOut = fOut)
-      fut.flatMap { _ =>
-        cursor.step { implicit tx =>
-          done()
-        }
-      }
+    LayerUtil.mkTransform(nameOut) { fOut =>
+      runRemovePitch(fOut = fOut)
     }
   }
 

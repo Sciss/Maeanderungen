@@ -263,7 +263,7 @@ object Layer {
 
   def putTransformedText[S <: Sys[S]]()(implicit tx: S#Tx, ctx: Context[S], config: Config): Future[Unit] = {
     import ctx.cursor
-    val futPch = TextTransforms.removePitch[S]()
+    val futPch = TextTransforms.mkRemovePitch[S]()
     flatMapTx[S, stm.Source[S#Tx, AudioCue.Obj[S]], Unit](futPch) { implicit tx => cueH =>
       val cue     = cueH()
       val partial = mkPartialContext(Category.HybridSound, cue)
@@ -347,11 +347,6 @@ object Layer {
 
   case class NamedSpan(span: Span, name: String)
 
-  def unite(n1: String, n2: String): String = {
-    val common = (n1 zip n2).prefixLength(tup => tup._1 == tup._2)
-    if (common > 0) n1.substring(0, common) else "name"
-  }
-
   def groupWithinProximity[S <: Sys[S]](tl: Timeline[S], maxDistanceSec: Double)
                                        (implicit tx: S#Tx): Vec[NamedSpan] = {
     val b           = Vec.newBuilder[NamedSpan]
@@ -369,7 +364,7 @@ object Layer {
             current   = Some(NamedSpan(sp, name))
           case Some(NamedSpan(sp2, name2)) =>
             if (sp2.shift(maxDistFr).touches(sp)) {
-              current = Some(NamedSpan(sp union sp2, unite(name2, name)))
+              current = Some(NamedSpan(sp union sp2, Util.unite(name2, name)))
             } else {
               flush()
               current = Some(NamedSpan(sp, name))
@@ -382,38 +377,6 @@ object Layer {
     flush()
     b.result()
   }
-
-  def atomic[S <: Sys[S], A](body: S#Tx => A)(implicit cursor: stm.Cursor[S]): A =
-    cursor.step(tx => body(tx))
-
-  def flatMapTx[S <: Sys[S], A, B](fut: Future[A])(body: S#Tx => A => Future[B])
-                                  (implicit cursor: stm.Cursor[S]): Future[B] = {
-    import SoundProcesses.executionContext
-    fut.flatMap { a =>
-      atomic[S, Future[B]] { implicit tx => body(tx)(a) }
-    }
-  }
-
-  def mapTx[S <: Sys[S], A, B](fut: Future[A])(body: S#Tx => A => B)
-                                  (implicit cursor: stm.Cursor[S]): Future[B] = {
-    import SoundProcesses.executionContext
-    fut.map { a =>
-      atomic[S, B] { implicit tx => body(tx)(a) }
-    }
-  }
-
-  def mkUnique(f: File): File =
-    if (!f.exists()) f else {
-      var count   = 0
-      var exists  = true
-      var fT      = f
-      while (exists) {
-        count += 1
-        fT = f.replaceName(s"${f.base}-$count.${f.ext}")
-        exists = fT.exists()
-      }
-      fT
-    }
 
   def executePlacementAndMask[S <: Sys[S]](placement: ISeq[PlacedRegion], gain: Double)
                                           (implicit tx: S#Tx, ctx: Context[S], config: Config): Future[Unit] = {
@@ -428,7 +391,8 @@ object Layer {
     val futAll: Vec[Future[Unit]] = tlFgSpans.map { case NamedSpan(tlFgSpan, nameFg) =>
       import ctx.cursor
       val spanFg    = widen(tlFgSpan, durSec = 0.5)
-      val (nameBg, tlBg) = copyForReplacementBounce(ctx.tl, spanFg)
+      val replace   = copyForReplacementBounce(ctx.tl, spanFg)
+      import replace.{tlBg, nameBg}
       tlBg.name = s"background ${new java.util.Date}"
       if (!config.deleteTempFiles) ctx.folderTemp.addLast(tlBg)
       val futRender = tlBg.span.nonEmptyOption.fold(Future.successful(())) { spanBg =>
@@ -441,18 +405,20 @@ object Layer {
         log(s"spanFg = $spanFg (${spanToTime(spanFg)}), spanBg = $spanBg (${spanToTime(spanBg)}), numFrames = $numFrames / ${framesToTime(union.length)}")
         val dirOut    = config.baseDir / "audio_work" / "rendered"
         dirOut.mkdirs()
-        val fOut      = mkUnique(dirOut / s"$nameFg-mask-$nameBg.aif")
+        val nameOut   = s"$nameFg-mask-$nameBg.aif"
 
         val futMask   = futBncFg.flatMap { fInFg =>
-          flatMapTx[S, File, Unit](futBncBg) { implicit tx => fInBg =>
-            SoundTransforms.runMask[S](fInFg = fInFg, offFg = offFg, fInBg = fInBg, offBg = offBg,
-              numFrames = numFrames, fOut = fOut)
+          flatMapTx[S, File, CueSource[S]](futBncBg) { implicit tx => fInBg =>
+            SoundTransforms.mkMask[S](fInFg = fInFg, offFg = offFg, fInBg = fInBg, offBg = offBg,
+              numFrames = numFrames, nameOut = nameOut)
           }
         }
 
 //        val futMask = futBncFg.map(_ => ())
 
-        futMask
+        mapTx[S, CueSource[S], Unit](futMask) { implicit tx => _ =>
+          ???
+        }
 
         /*
 
@@ -472,11 +438,11 @@ object Layer {
 
   def executePlacement[S <: Sys[S]](placement: ISeq[PlacedRegion], gain: Double, target: Timeline.Modifiable[S],
                                     pMain: Proc[S])
-                                   (implicit tx: S#Tx, ctx: Context[S], config: Config): Unit = {
+                                   (implicit tx: S#Tx, ctx: Context[S]): Unit = {
     import ctx.{pMain => _, _}
     val vec       = placement.toVector
     val intelObj  = BooleanObj.newVar[S](intelligible)
-    val colorVal  = mkColor(material)
+    val colorVal  = mkColor[S](material)
     for (i <- vec.indices) {
       val placed = vec(i)
       val fadeIn = if (placed.region.fadeIn.numFrames > 0 || i == 0) placed.region.fadeIn else {
@@ -503,7 +469,7 @@ object Layer {
       val gOffset = placed.region.span.start - fadeIn.numFrames
       val spanTL  = Span(startTL, stopTL)
       val gainVal = gain * placed.relativeGain
-      val (_, pr)  = mkAudioRegion(target, time = spanTL, audioCue = material, pMain = pMain,
+      val (_, pr)  = mkAudioRegion[S](target, time = spanTL, audioCue = material, pMain = pMain,
         gOffset = gOffset, fadeIn = fadeIn, fadeOut = fadeOut, gain = gainVal)
       val prAttr = pr.attr
       prAttr.put(attrIntel, intelObj)
@@ -522,8 +488,7 @@ object Layer {
   }
 
     // puts a plain (non-transformed) object with pauses, retaining intelligibility
-  def tryPlacePlainIntel[S <: Sys[S]](matSpan: Span)(implicit tx: S#Tx, ctx: Context[S],
-                                                     config: Config): Option[List[PlacedRegion]] = {
+  def tryPlacePlainIntel[S <: Sys[S]](matSpan: Span)(implicit tx: S#Tx, ctx: Context[S]): Option[List[PlacedRegion]] = {
     import ctx._
 
     val pos0TLTry = (rnd.nextDouble() * (tlNumFrames - matSpan.length)).toLong

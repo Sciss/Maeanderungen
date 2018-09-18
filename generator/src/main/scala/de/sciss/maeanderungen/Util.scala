@@ -17,7 +17,7 @@ import java.awt.{Color, Font}
 
 import de.sciss.chart.{Chart, XYChart}
 import de.sciss.desktop.Desktop
-import de.sciss.file.File
+import de.sciss.file._
 import de.sciss.kollflitz.Vec
 import de.sciss.numbers
 import de.sciss.optional.Optional
@@ -129,4 +129,22 @@ object Util {
     val stop  = tf.format(sp.stop )
     s"[$start - $stop]"
   }
+
+  def unite(n1: String, n2: String): String = {
+    val common = (n1 zip n2).prefixLength(tup => tup._1 == tup._2)
+    if (common > 0) n1.substring(0, common) else "name"
+  }
+
+  def mkUnique(f: File): File =
+    if (!f.exists()) f else {
+      var count   = 0
+      var exists  = true
+      var fT      = f
+      while (exists) {
+        count += 1
+        fT = f.replaceName(s"${f.base}-$count.${f.ext}")
+        exists = fT.exists()
+      }
+      fT
+    }
 }

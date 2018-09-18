@@ -17,10 +17,12 @@ import de.sciss.file._
 import de.sciss.fscape.lucre.FScape
 import de.sciss.lucre.artifact.{Artifact, ArtifactLocation}
 import de.sciss.lucre.expr.{BooleanObj, IntObj}
-import de.sciss.lucre.stm.{Cursor, Folder, Obj, Sys}
+import de.sciss.lucre.stm
+import de.sciss.lucre.stm.{Cursor, Folder, Obj}
+import de.sciss.lucre.synth.Sys
 import de.sciss.synth.proc
 import de.sciss.synth.proc.Implicits._
-import de.sciss.synth.proc.{Action, AudioCue, GenContext, Timeline, Workspace}
+import de.sciss.synth.proc.{Action, AudioCue, GenContext, SoundProcesses, Timeline, Workspace}
 
 import scala.concurrent.{Future, Promise}
 import scala.language.higherKinds
@@ -33,7 +35,7 @@ object Builder {
   def mkFolder[S <: Sys[S]](parent: Folder[S], name: String)(implicit tx: S#Tx): Folder[S] =
     mkObj[S, Folder](parent, name, -1)(Folder[S])
 
-  def mkObj[S <: Sys[S], R[~ <: Sys[~]] <: Obj[~]](parent: Folder[S], name: String, version: Int)
+  def mkObj[S <: Sys[S], R[~ <: stm.Sys[~]] <: Obj[~]](parent: Folder[S], name: String, version: Int)
                                                   (create: => R[S])
                                                   (implicit tx: S#Tx, ct: ClassTag[R[S]]): R[S] = {
     val opt = parent.$[R](name)
@@ -67,7 +69,7 @@ object Builder {
     }
   }
 
-  def mkObjIn[S <: Sys[S], R[~ <: Sys[~]] <: Obj[~]](parent: Obj[S], key: String, version: Int)(create: => R[S])
+  def mkObjIn[S <: Sys[S], R[~ <: stm.Sys[~]] <: Obj[~]](parent: Obj[S], key: String, version: Int)(create: => R[S])
                                                     (implicit tx: S#Tx, ct: ClassTag[R[S]]): R[S] = {
     val a = parent.attr
     val opt = a.$[R](key)
@@ -133,4 +135,24 @@ object Builder {
 
     res.future
   }
+
+  def atomic[S <: Sys[S], A](body: S#Tx => A)(implicit cursor: stm.Cursor[S]): A =
+    cursor.step(tx => body(tx))
+
+  def flatMapTx[S <: Sys[S], A, B](fut: Future[A])(body: S#Tx => A => Future[B])
+                                  (implicit cursor: stm.Cursor[S]): Future[B] = {
+    import SoundProcesses.executionContext
+    fut.flatMap { a =>
+      atomic[S, Future[B]] { implicit tx => body(tx)(a) }
+    }
+  }
+
+  def mapTx[S <: Sys[S], A, B](fut: Future[A])(body: S#Tx => A => B)
+                              (implicit cursor: stm.Cursor[S]): Future[B] = {
+    import SoundProcesses.executionContext
+    fut.map { a =>
+      atomic[S, B] { implicit tx => body(tx)(a) }
+    }
+  }
+
 }

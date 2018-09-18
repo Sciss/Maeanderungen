@@ -17,15 +17,24 @@ import de.sciss.equal.Implicits._
 import de.sciss.file.File
 import de.sciss.numbers.Implicits._
 import de.sciss.fscape.{GE, Graph, stream}
+import de.sciss.lucre.stm
 import de.sciss.lucre.synth.Sys
 import de.sciss.maeanderungen.Layer.Context
 import de.sciss.synth.io.{AudioFile, AudioFileSpec}
+import de.sciss.synth.proc.AudioCue
 
 import scala.concurrent.{Future, Promise}
 import scala.util.control.NonFatal
 
 object SoundTransforms {
-  def runMask[S <: Sys[S]](fInFg: File, offFg: Long, fInBg: File, offBg: Long, numFrames: Long, fOut: File)
+  def mkMask[S <: Sys[S]](fInFg: File, offFg: Long, fInBg: File, offBg: Long, numFrames: Long, nameOut: String /* fOut: File */)
+                          (implicit tx: S#Tx, ctx: Context[S], config: Config): Future[stm.Source[S#Tx, AudioCue.Obj[S]]] = {
+    LayerUtil.mkRender(nameOut) { fOut =>
+      runMask[S](fInFg = fInFg, offFg = offFg, fInBg = fInBg, offBg = offBg, numFrames = numFrames, fOut = fOut)
+    }
+  }
+
+  private def runMask[S <: Sys[S]](fInFg: File, offFg: Long, fInBg: File, offBg: Long, numFrames: Long, fOut: File)
                           (implicit tx: S#Tx, ctx: Context[S], config: Config): Future[Unit] = {
 
     val specFg = AudioFile.readSpec(fInFg)
