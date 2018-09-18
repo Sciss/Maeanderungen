@@ -20,27 +20,23 @@ import de.sciss.equal.Implicits._
 import de.sciss.file._
 import de.sciss.kollflitz.{ISeq, Vec}
 import de.sciss.lucre.bitemp.BiGroup
-import de.sciss.lucre.expr.{BooleanObj, DoubleObj, IntObj, LongObj, SpanLikeObj}
-import de.sciss.lucre.stm.{Cursor, Folder, Obj, Random, TxnRandom}
-import de.sciss.lucre.swing.edit.EditVar
-import de.sciss.lucre.synth.{Server, Sys}
+import de.sciss.lucre.expr.{BooleanObj, DoubleObj, IntObj, LongObj}
+import de.sciss.lucre.stm
+import de.sciss.lucre.stm.{Cursor, Folder, Random, TxnRandom}
+import de.sciss.lucre.synth.Sys
 import de.sciss.maeanderungen.Builder._
 import de.sciss.maeanderungen.LayerUtil._
 import de.sciss.maeanderungen.Ops._
-import de.sciss.mellite.ProcActions
-import de.sciss.mellite.gui.edit.{EditAttrMap, EditTimelineInsertObj, Edits}
-import de.sciss.mellite.gui.{ActionBounceTimeline, ObjView}
+import de.sciss.mellite.gui.ObjView
 import de.sciss.numbers.Implicits._
-import de.sciss.span.{Span, SpanLike}
-import de.sciss.synth.{Curve, proc}
-import de.sciss.synth.io.SampleFormat
+import de.sciss.span.Span
+import de.sciss.synth.Curve
 import de.sciss.synth.proc.Implicits._
-import de.sciss.synth.proc.{AudioCue, FadeSpec, ObjKeys, Proc, TimeRef, Timeline, Workspace}
-import javax.swing.undo.UndoableEdit
+import de.sciss.synth.proc.{AudioCue, FadeSpec, Proc, TimeRef, Timeline, Workspace}
+import de.sciss.synth.proc.SoundProcesses
 
 import scala.annotation.tailrec
-import scala.concurrent.{Future, Promise}
-import scala.util.control.NonFatal
+import scala.concurrent.Future
 
 object Layer {
   final val DEFAULT_VERSION = 1
@@ -80,7 +76,7 @@ object Layer {
   def log(what: => String): Unit =
     println(s"[log] $what")
 
-  def process[S <: Sys[S]]()(implicit tx: S#Tx, workspace: Workspace[S], config: Config): Unit = {
+  def process[S <: Sys[S]]()(implicit tx: S#Tx, workspace: Workspace[S], config: Config): Future[Unit] = {
     implicit val cursor: Cursor[S] = workspace.cursor
     val root          = workspace.root
     val fRender       = mkFolder(root, "renderings")
@@ -194,7 +190,7 @@ object Layer {
       pMain         = pMain
     )
 
-    if (transform) {
+    val futRender = if (transform) {
       if (c.isText) {
         putTransformedText()
       } else {
@@ -208,23 +204,21 @@ object Layer {
       }
     }
 
-    /* if (rndUsed()) */ {
+    mapTx[S, Unit, Unit](futRender) { implicit tx => _ =>
       val seed1 = rnd.nextLong()
       seed0.update(seed1)
     }
   }
 
-  def putTransformedText[S <: Sys[S]]()(implicit tx: S#Tx, ctx: Context[S], config: Config): Unit = {
-    import ctx._
+  def putTransformedText[S <: Sys[S]]()(implicit tx: S#Tx, ctx: Context[S], config: Config): Future[Unit] = {
     ???
   }
 
-  def putTransformedSound[S <: Sys[S]]()(implicit tx: S#Tx, ctx: Context[S], config: Config): Unit = {
-    import ctx._
+  def putTransformedSound[S <: Sys[S]]()(implicit tx: S#Tx, ctx: Context[S], config: Config): Future[Unit] = {
     ???
   }
 
-  def putPlainText[S <: Sys[S]]()(implicit tx: S#Tx, ctx: Context[S], config: Config): Unit = {
+  def putPlainText[S <: Sys[S]]()(implicit tx: S#Tx, ctx: Context[S], config: Config): Future[Unit] = {
     import ctx._
 
     /*
@@ -255,7 +249,7 @@ object Layer {
     }
   }
 
-  def putPlainTextFull[S <: Sys[S]]()(implicit tx: S#Tx, ctx: Context[S], config: Config): Unit = {
+  def putPlainTextFull[S <: Sys[S]]()(implicit tx: S#Tx, ctx: Context[S], config: Config): Future[Unit] = {
     // if the text must be intelligible,
     // we compare against the background layer audio.
     // if not, we go ahead.
@@ -288,31 +282,39 @@ object Layer {
   }
 
   // puts a plain (non-transformed) text in full, retaining intelligibility
-  def putPlainTextFullIntel[S <: Sys[S]]()(implicit tx: S#Tx, ctx: Context[S], config: Config): Unit = {
+  def putPlainTextFullIntel[S <: Sys[S]]()(implicit tx: S#Tx, ctx: Context[S], config: Config): Future[Unit] = {
     val matSpan = Span(0L, ctx.matNumFrames)
     putPlainTextIntel(matSpan)
   }
 
+  case class NamedSpan(span: Span, name: String)
+
+  def unite(n1: String, n2: String): String = {
+    val common = (n1 zip n2).prefixLength(tup => tup._1 == tup._2)
+    if (common > 0) n1.substring(0, common) else "name"
+  }
+
   def groupWithinProximity[S <: Sys[S]](tl: Timeline[S], maxDistanceSec: Double)
-                                       (implicit tx: S#Tx): Vec[Span] = {
-    val b           = Vec.newBuilder[Span]
+                                       (implicit tx: S#Tx): Vec[NamedSpan] = {
+    val b           = Vec.newBuilder[NamedSpan]
     val maxDistFr   = (maxDistanceSec * TimeRef.SampleRate).toLong
-    var current     = Span.Void: Span.SpanOrVoid
+    var current     = Option.empty[NamedSpan]
 
     def flush(): Unit =
-      current.nonEmptyOption.foreach(b += _)
+      current.foreach(b += _)
 
     tl.iterator.foreach {
-      case (sp: Span, _) =>
+      case (sp: Span, vec) =>
+        val name = vec.head.value.name
         current match {
-          case Span.Void =>
-            current = sp
-          case sp2: Span =>
+          case None =>
+            current   = Some(NamedSpan(sp, name))
+          case Some(NamedSpan(sp2, name2)) =>
             if (sp2.shift(maxDistFr).touches(sp)) {
-              current = sp union sp2
+              current = Some(NamedSpan(sp union sp2, unite(name2, name)))
             } else {
               flush()
-              current = sp
+              current = Some(NamedSpan(sp, name))
             }
         }
 
@@ -323,31 +325,82 @@ object Layer {
     b.result()
   }
 
+  def atomic[S <: Sys[S], A](body: S#Tx => A)(implicit cursor: stm.Cursor[S]): A =
+    cursor.step(tx => body(tx))
+
+  def flatMapTx[S <: Sys[S], A, B](fut: Future[A])(body: S#Tx => A => Future[B])
+                                  (implicit cursor: stm.Cursor[S]): Future[B] = {
+    import SoundProcesses.executionContext
+    fut.flatMap { a =>
+      atomic[S, Future[B]] { implicit tx => body(tx)(a) }
+    }
+  }
+
+  def mapTx[S <: Sys[S], A, B](fut: Future[A])(body: S#Tx => A => B)
+                                  (implicit cursor: stm.Cursor[S]): Future[B] = {
+    import SoundProcesses.executionContext
+    fut.map { a =>
+      atomic[S, B] { implicit tx => body(tx)(a) }
+    }
+  }
+
+  def mkUnique(f: File): File =
+    if (!f.exists()) f else {
+      var count   = 0
+      var exists  = true
+      var fT      = f
+      while (exists) {
+        count += 1
+        fT = f.replaceName(s"${f.base}-$count${f.ext}")
+        exists = fT.exists()
+      }
+      fT
+    }
+
   def executePlacementAndMask[S <: Sys[S]](placement: ISeq[PlacedRegion], gain: Double)
-                                          (implicit tx: S#Tx, ctx: Context[S], config: Config): Unit = {
+                                          (implicit tx: S#Tx, ctx: Context[S], config: Config): Future[Unit] = {
+    import SoundProcesses.executionContext
     val tlFg = Timeline[S]
     executePlacement[S](placement, gain = gain, target = tlFg)
     val tlFgSpans = groupWithinProximity(tlFg, maxDistanceSec = 1.0)
-    tlFgSpans.foreach { tlFgSpan =>
+    val futAll: Vec[Future[Unit]] = tlFgSpans.map { case NamedSpan(tlFgSpan, nameFg) =>
       import ctx.cursor
-      val spanW     = widen(tlFgSpan, durSec = 0.5)
-      val tlBg      = copyForReplacementBounce(ctx.tl, spanW)
-      tlBg.span.nonEmptyOption.foreach { spanW2 =>
-        val futBncFg  = bounceTemp[S](tlFg, spanW )
-        val futBncBg  = bounceTemp[S](tlBg, spanW2)
+      val spanFg    = widen(tlFgSpan, durSec = 0.5)
+      val tlBg      = copyForReplacementBounce(ctx.tl, spanFg)
+      val futRender = tlBg.span.nonEmptyOption.fold(Future.successful(())) { spanBg =>
+        val futBncFg  = bounceTemp[S](tlFg, spanFg )
+        val futBncBg  = bounceTemp[S](tlBg, spanBg)
+        val union     = spanFg union spanBg
+        val offFg     = spanFg.start - union.start
+        val offBg     = spanBg.start - union.start
+        val numFrames = union.length
+        val dirOut    = config.baseDir / "audio_work" / "rendered"
+        dirOut.mkdirs()
+        val fOut      = mkUnique(dirOut / s"$nameFg.aif")
 
-        ???
+        val futMask   = futBncFg.flatMap { fInFg =>
+          flatMapTx[S, File, Unit](futBncBg) { implicit tx => fInBg =>
+            SoundTransforms.run[S](fInFg = fInFg, offFg = offFg, fInBg = fInBg, offBg = offBg,
+              numFrames = numFrames, fOut = fOut)
+          }
+        }
+
+        futMask
 
         /*
 
-          - run masking fsc (with spanW-spanW2 alignment).
           - replace in ctx.tl (we need map data from copyForReplacementBounce)
 
          */
       }
-      ???
+      futRender
     }
-    executePlacement[S](placement, gain = gain, target = ctx.tl)
+
+    val futOne: Future[Vec[Unit]] = Future.sequence(futAll)
+    import ctx.cursor
+    mapTx[S, Vec[Unit], Unit](futOne) { implicit tx => _ =>
+      executePlacement[S](placement, gain = gain, target = ctx.tl)
+    }
   }
 
   def executePlacement[S <: Sys[S]](placement: ISeq[PlacedRegion], gain: Double, target: Timeline.Modifiable[S])
@@ -391,11 +444,11 @@ object Layer {
   }
 
     // puts a plain (non-transformed) text in full, retaining intelligibility
-  def putPlainTextIntel[S <: Sys[S]](matSpan: Span)(implicit tx: S#Tx, ctx: Context[S], config: Config): Unit = {
+  def putPlainTextIntel[S <: Sys[S]](matSpan: Span)(implicit tx: S#Tx, ctx: Context[S], config: Config): Future[Unit] = {
     import ctx._
     val placementOpt  = tryPlacePlainIntel[S](matSpan = matSpan)
     val gainVal       = (65.0 - loud95).dbAmp
-    placementOpt.foreach { placement =>
+    placementOpt.fold(Future.successful(())) { placement =>
       executePlacementAndMask(placement, gain = gainVal)
     }
   }
@@ -473,11 +526,11 @@ object Layer {
     Some(res)
   }
 
-  def putPlainTextFaded[S <: Sys[S]]()(implicit tx: S#Tx, ctx: Context[S], config: Config): Unit = {
+  def putPlainTextFaded[S <: Sys[S]]()(implicit tx: S#Tx, ctx: Context[S], config: Config): Future[Unit] = {
     ???
   }
 
-  def putPlainTextCut[S <: Sys[S]]()(implicit tx: S#Tx, ctx: Context[S], config: Config): Unit = {
+  def putPlainTextCut[S <: Sys[S]]()(implicit tx: S#Tx, ctx: Context[S], config: Config): Future[Unit] = {
     import ctx._
     val startPos0     = (rnd.nextDouble() * matNumFrames).toLong
     val cutLen0       = math.max(TimeRef.SampleRate, rnd.nextDouble() * matNumFrames).toLong
@@ -491,7 +544,7 @@ object Layer {
     putPlainTextIntel(matSpan)
   }
 
-  def putPlainSound[S <: Sys[S]]()(implicit tx: S#Tx, ctx: Context[S], config: Config): Unit = {
+  def putPlainSound[S <: Sys[S]]()(implicit tx: S#Tx, ctx: Context[S], config: Config): Future[Unit] = {
     import ctx._
     if (complete) {
       putPlainSoundFull[S]()
@@ -500,12 +553,12 @@ object Layer {
     }
   }
 
-  def putPlainSoundFull[S <: Sys[S]]()(implicit tx: S#Tx, ctx: Context[S], config: Config): Unit = {
+  def putPlainSoundFull[S <: Sys[S]]()(implicit tx: S#Tx, ctx: Context[S], config: Config): Future[Unit] = {
     val matSpan = Span(0L, ctx.matNumFrames)
     putPlainSoundIntel(matSpan)
   }
 
-  def putPlainSoundCut[S <: Sys[S]]()(implicit tx: S#Tx, ctx: Context[S], config: Config): Unit = {
+  def putPlainSoundCut[S <: Sys[S]]()(implicit tx: S#Tx, ctx: Context[S], config: Config): Future[Unit] = {
     import ctx._
     val startPos0     = (rnd.nextDouble() * matNumFrames).toLong
     val cutLen0       = math.max(TimeRef.SampleRate, rnd.nextDouble() * matNumFrames).toLong
@@ -539,11 +592,11 @@ object Layer {
     }
   }
 
-  def putPlainSoundIntel[S <: Sys[S]](matSpan: Span)(implicit tx: S#Tx, ctx: Context[S], config: Config): Unit = {
+  def putPlainSoundIntel[S <: Sys[S]](matSpan: Span)(implicit tx: S#Tx, ctx: Context[S], config: Config): Future[Unit] = {
     import ctx._
     val placementOpt  = tryPlacePlainIntel[S](matSpan = matSpan)
     val gainVal       = (65.0 - loud95).dbAmp // XXX TODO --- we should probably take loud50 into account as well
-    placementOpt.foreach { placement =>
+    placementOpt.fold(Future.successful(())) { placement =>
       executePlacementAndMask(placement, gain = gainVal)
     }
   }

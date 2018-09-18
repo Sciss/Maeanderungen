@@ -1,25 +1,55 @@
+/*
+ *  SoundTransforms.scala
+ *  (Mäanderungen)
+ *
+ *  Copyright (c) 2017-2018 Hanns Holger Rutz. All rights reserved.
+ *
+ *  This software is published under the GNU Affero General Public License v3+
+ *
+ *
+ *  For further information, please contact Hanns Holger Rutz at
+ *  contact@sciss.de
+ */
+
 package de.sciss.maeanderungen
 
+import de.sciss.equal.Implicits._
 import de.sciss.file.File
 import de.sciss.numbers.Implicits._
-import de.sciss.fscape.{Graph, stream}
+import de.sciss.fscape.{GE, Graph, stream}
 import de.sciss.lucre.synth.Sys
 import de.sciss.maeanderungen.Layer.Context
-import de.sciss.synth.io.AudioFileSpec
+import de.sciss.synth.io.{AudioFile, AudioFileSpec}
 
 import scala.concurrent.{Future, Promise}
 import scala.util.control.NonFatal
 
 object SoundTransforms {
-  def run[S <: Sys[S]](fInFg: File, fInBg: File, fOut: File, numFrames: Long)
-                      (implicit tx: S#Tx, ctx: Context[S]): Future[Unit] = {
+  def run[S <: Sys[S]](fInFg: File, offFg: Long, fInBg: File, offBg: Long, numFrames: Long, fOut: File)
+                      (implicit tx: S#Tx, ctx: Context[S], config: Config): Future[Unit] = {
+
+    val specFg = AudioFile.readSpec(fInFg)
+    val specBg = AudioFile.readSpec(fInBg)
 
     val g = Graph {
       import de.sciss.fscape.graph._
 
-      val inFg       = AudioFileIn(fInFg, numChannels = 1) // .drop(29363)
-      //    val in2       = AudioFileIn(fIn2, numChannels = 2).out(0) // .drop(40000) * 0.7
-      def mkBgIn() = AudioFileIn(fInBg, numChannels = 1) * (-0.0.dbAmp)
+      def mkIn(f: File, spec: AudioFileSpec, off: Long): GE = {
+        val in0   = AudioFileIn(f, numChannels = config.numChannels)
+        val in1   = if (off + spec.numFrames === numFrames) {
+          in0
+        } else {
+          val pad = numFrames - (off + spec.numFrames)
+          in0 ++ DC(0.0).take(pad)
+        }
+        if (off === 0L) in1 else DC(0.0).take(off) ++ in1
+      }
+
+      def mkFgIn(): GE = mkIn(fInFg, specFg, offFg)
+      val inFg = mkFgIn()
+
+      def mkBgIn(): GE = mkIn(fInBg, specBg, offBg)
+
       val inBg       = mkBgIn()
       val fMin      = 50.0
       val sr        = 48000.0
@@ -95,8 +125,9 @@ object SoundTransforms {
       val conv      = Real1IFFT(convF, convSize) * convSize
       val convLap   = OverlapAdd(conv, convSize, stepSize).take(numFrames)
 
-      val writtenFlt = AudioFileOut(convLap, fOut, AudioFileSpec(numChannels = 1, sampleRate = sr))
+      val writtenFlt = AudioFileOut(convLap, fOut, AudioFileSpec(numChannels = config.numChannels, sampleRate = sr))
       // writtenFlt.poll(sr * 10, "frames-flt")
+      Progress(writtenFlt / numFrames, Metro(specFg.sampleRate))
     }
 
     val res = Promise[Unit]()

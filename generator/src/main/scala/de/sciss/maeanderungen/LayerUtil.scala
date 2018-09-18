@@ -366,9 +366,12 @@ object LayerUtil {
     val sCfg                = Server.Config()
     sCfg.outputBusChannels  = config.numChannels
     sCfg.inputBusChannels   = 0
+    sCfg.sampleRate         = config.sampleRate
     tx.afterCommit {
       import ctx.cursor
-      val fTmp            = File.createTemp(suffix = ".aif")
+      val dirTmp          = config.baseDir / "audio_work" / "temp"
+      dirTmp.mkdirs()
+      val fTmp            = File.createTempIn(dirTmp, suffix = ".aif", deleteOnExit = config.deleteTempFiles)
       sCfg.nrtOutputPath  = fTmp.path
       val settings        = ActionBounceTimeline.PerformSettings[S](
         realtime = false, fileFormat = ActionBounceTimeline.FileFormat.PCM(sampleFormat = SampleFormat.Float),

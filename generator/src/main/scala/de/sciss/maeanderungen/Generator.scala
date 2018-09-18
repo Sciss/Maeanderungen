@@ -18,6 +18,9 @@ import de.sciss.lucre.stm.store.BerkeleyDB
 import de.sciss.mellite.Mellite
 import de.sciss.synth.proc.{Durable, Workspace}
 
+import scala.concurrent.duration.Duration
+import scala.concurrent.{Await, Future}
+
 object Generator {
   def main(args: Array[String]): Unit = {
     val default = Config()
@@ -27,6 +30,11 @@ object Generator {
         .required()
         .text(s"Input Mellite workspace that contains 'material' folder.")
         .action { (v, c) => c.copy(ws = v) }
+
+      opt[File]('b', "base")
+        .required()
+        .text(s"Base directory.")
+        .action { (v, c) => c.copy(baseDir = v) }
 
       opt[Double]("min-dur")
         .text(s"Minimum duration in seconds (default: ${default.minDur})")
@@ -88,6 +96,10 @@ object Generator {
         .text(s"Probability ratio text to sound (1 = equal) (default: ${default.textSoundRatio})")
         .validate { v => if (v >= 0) success else failure("Must be >= 0") }
         .action { (v, c) => c.copy(textSoundRatio = v) }
+
+      opt[Unit]("keep-temp-files")
+        .text("Do not delete temp files")
+        .action { (_, c) => c.copy(deleteTempFiles = false) }
     }
     p.parse(args, default).fold(sys.exit(1)) { implicit config => run() }
   }
@@ -99,14 +111,19 @@ object Generator {
       case d: Workspace.Durable =>
         type S = Durable
         implicit val _d: Workspace.Durable = d
+
+        val futRender: Future[Unit] = d.system.step { implicit tx =>
+          if (config.prepare) Preparation .process[S]()
+          if (config.render ) Layer       .process[S]() else Future.successful(())
+        }
+
+        println("Rendering...")
         try {
-          d.system.step { implicit tx =>
-            if (config.prepare) Preparation .process[S]()
-            if (config.render ) Layer       .process[S]()
-          }
+          Await.result(futRender, Duration.Inf)
         } finally {
           d.close()
         }
+
         sys.exit()
 
       case other =>

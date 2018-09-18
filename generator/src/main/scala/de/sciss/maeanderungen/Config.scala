@@ -16,6 +16,7 @@ package de.sciss.maeanderungen
 import de.sciss.file.{File, file}
 
 case class Config(ws                : File    = file("material.mllt"),
+                  baseDir           : File    = file("base"),
                   minDur            : Double  = 60.0 * 4,
                   maxDur            : Double  = 60.0 * 8,
                   radio             : Boolean = false,
@@ -26,7 +27,9 @@ case class Config(ws                : File    = file("material.mllt"),
                   probShorten       : Double  = 0.5,
                   probShortenFade   : Double  = 0.25,
                   numChannels       : Int     = 2,
+                  sampleRate        : Int     = 48000,
                   seed              : Option[Long] = None,
                   maxPan            : Double  = 0.5,
-                  textSoundRatio    : Double  = 1.0
+                  textSoundRatio    : Double  = 1.0,
+                  deleteTempFiles   : Boolean = true,
                  )
