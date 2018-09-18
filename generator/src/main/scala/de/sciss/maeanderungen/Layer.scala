@@ -335,6 +335,7 @@ object Layer {
       tlBg.span.nonEmptyOption.foreach { spanW2 =>
         val futBncFg  = bounceTemp[S](tlFg, spanW )
         val futBncBg  = bounceTemp[S](tlBg, spanW2)
+
         ???
 
         /*
