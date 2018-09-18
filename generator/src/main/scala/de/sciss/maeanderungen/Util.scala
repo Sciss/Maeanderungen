@@ -21,7 +21,9 @@ import de.sciss.file.File
 import de.sciss.kollflitz.Vec
 import de.sciss.numbers
 import de.sciss.optional.Optional
+import de.sciss.span.Span
 import de.sciss.synth.io.AudioFile
+import de.sciss.synth.proc.TimeRef
 import org.jfree.chart.plot.{CategoryPlot, XYPlot}
 import org.jfree.chart.renderer.xy.{StandardXYBarPainter, XYBarRenderer, XYStepAreaRenderer}
 
@@ -116,5 +118,15 @@ object Util {
     xAxis.setTickLabelFont(fnt2)
     yAxis.setLabelFont(fnt1)
     yAxis.setTickLabelFont(fnt2)
+  }
+
+  private lazy val tf = new TimeFormat(Span.All, clip = false, sampleRate = TimeRef.SampleRate)
+
+  def framesToTime(n: Long): String = tf.format(n)
+
+  def spanToTime(sp: Span): String = {
+    val start = tf.format(sp.start)
+    val stop  = tf.format(sp.stop )
+    s"[$start - $stop]"
   }
 }

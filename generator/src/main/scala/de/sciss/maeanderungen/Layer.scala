@@ -34,6 +34,7 @@ import de.sciss.synth.Curve
 import de.sciss.synth.proc.Implicits._
 import de.sciss.synth.proc.{AudioCue, FadeSpec, Proc, TimeRef, Timeline, Workspace}
 import de.sciss.synth.proc.SoundProcesses
+import Util.{spanToTime, framesToTime}
 
 import scala.annotation.tailrec
 import scala.concurrent.Future
@@ -50,9 +51,17 @@ object Layer {
   final case class Pause(span: Span, break: Boolean)
 
   final case class RegionAt(frame: Long, span: Span, pause: Option[Pause],
-                            fadeIn: FadeSpec = FadeSpec(0L), fadeOut: FadeSpec = FadeSpec(0L))
+                            fadeIn: FadeSpec = FadeSpec(0L), fadeOut: FadeSpec = FadeSpec(0L)) {
 
-  final case class PlacedRegion(posTL: Long, region: RegionAt, relativeGain: Double = 1.0)
+    override def toString: String =
+      s"$productPrefix(frame = $frame (${framesToTime(frame)}), span = $span (${spanToTime(span)}), pause = $pause, " +
+        s"fadeIn = $fadeIn, fadeOut = $fadeOut)"
+  }
+
+  final case class PlacedRegion(posTL: Long, region: RegionAt, relativeGain: Double = 1.0) {
+    override def toString: String =
+      s"$productPrefix(posTL = $posTL (${framesToTime(posTL)}), region = $region, relativeGain = $relativeGain)"
+  }
 
   final class Context[S <: Sys[S]](
                                     val tl            : Timeline.Modifiable[S],
@@ -69,6 +78,7 @@ object Layer {
                                     val pTape1        : Proc[S],
                                     val pTape2        : Proc[S],
                                     val pMain         : Proc[S],
+                                    val folderTemp    : Folder[S],
     )(
       implicit val rnd: Random[S#Tx], val workspace: Workspace[S], val cursor: Cursor[S]
     )
@@ -80,6 +90,7 @@ object Layer {
     implicit val cursor: Cursor[S] = workspace.cursor
     val root          = workspace.root
     val fRender       = mkFolder(root, "renderings")
+    val fTemp         = mkFolder(root, "temp")
     val fAux          = mkFolder(root, "aux")
     val pTape1        = mkObj[S, Proc](fAux, "tape-1", DEFAULT_VERSION)(mkTapeGraph(1))
     val pTape2        = mkObj[S, Proc](fAux, "tape-2", DEFAULT_VERSION)(mkTapeGraph(2))
@@ -187,7 +198,8 @@ object Layer {
       pan           = pan,
       pTape1        = pTape1,
       pTape2        = pTape2,
-      pMain         = pMain
+      pMain         = pMain,
+      folderTemp    = fTemp,
     )
 
     val futRender = if (transform) {
@@ -359,14 +371,19 @@ object Layer {
 
   def executePlacementAndMask[S <: Sys[S]](placement: ISeq[PlacedRegion], gain: Double)
                                           (implicit tx: S#Tx, ctx: Context[S], config: Config): Future[Unit] = {
+    log("executePlacementAndMask")
     import SoundProcesses.executionContext
     val tlFg = Timeline[S]
+    tlFg.name = s"foreground ${new java.util.Date}"
+    if (!config.deleteTempFiles) ctx.folderTemp.addLast(tlFg)
     executePlacement[S](placement, gain = gain, target = tlFg)
     val tlFgSpans = groupWithinProximity(tlFg, maxDistanceSec = 1.0)
     val futAll: Vec[Future[Unit]] = tlFgSpans.map { case NamedSpan(tlFgSpan, nameFg) =>
       import ctx.cursor
       val spanFg    = widen(tlFgSpan, durSec = 0.5)
       val tlBg      = copyForReplacementBounce(ctx.tl, spanFg)
+      tlBg.name = s"background ${new java.util.Date}"
+      if (!config.deleteTempFiles) ctx.folderTemp.addLast(tlBg)
       val futRender = tlBg.span.nonEmptyOption.fold(Future.successful(())) { spanBg =>
         val futBncFg  = bounceTemp[S](tlFg, spanFg )
         val futBncBg  = bounceTemp[S](tlBg, spanBg)
@@ -378,12 +395,14 @@ object Layer {
         dirOut.mkdirs()
         val fOut      = mkUnique(dirOut / s"$nameFg.aif")
 
-        val futMask   = futBncFg.flatMap { fInFg =>
-          flatMapTx[S, File, Unit](futBncBg) { implicit tx => fInBg =>
-            SoundTransforms.run[S](fInFg = fInFg, offFg = offFg, fInBg = fInBg, offBg = offBg,
-              numFrames = numFrames, fOut = fOut)
-          }
-        }
+//        val futMask   = futBncFg.flatMap { fInFg =>
+//          flatMapTx[S, File, Unit](futBncBg) { implicit tx => fInBg =>
+//            SoundTransforms.run[S](fInFg = fInFg, offFg = offFg, fInBg = fInBg, offBg = offBg,
+//              numFrames = numFrames, fOut = fOut)
+//          }
+//        }
+
+        val futMask = futBncFg.map(_ => ())
 
         futMask
 
@@ -559,9 +578,11 @@ object Layer {
   }
 
   def putPlainSoundCut[S <: Sys[S]]()(implicit tx: S#Tx, ctx: Context[S], config: Config): Future[Unit] = {
+    log("putPlainSoundCut")
     import ctx._
     val startPos0     = (rnd.nextDouble() * matNumFrames).toLong
     val cutLen0       = math.max(TimeRef.SampleRate, rnd.nextDouble() * matNumFrames).toLong
+    log(s"startPos0 = $startPos0 / ${framesToTime(startPos0)}, cutLen0 = $cutLen0 / ${framesToTime(cutLen0)}")
     val breakPauses   = pauses.filter(_.break)
     if (breakPauses.nonEmpty && 0.5.coin()) {
       val i             = breakPauses.indexWhere(_.span.start >= startPos0)
@@ -570,6 +591,7 @@ object Layer {
       val j             = breakPauses.indexWhere(_.span.start >= stopPos0, i + 1)
       val stopPos       = if (j < 0) matNumFrames - startPos else breakPauses(j).span.start
       val matSpan = Span(startPos, stopPos)
+      log(s"use breakPauses; matSpan = $matSpan / ${spanToTime(matSpan)}")
       putPlainTextIntel(matSpan)
     } else {
       val gainVal0      = (65.0 - loud95).dbAmp
@@ -577,6 +599,7 @@ object Layer {
       val startPos      = startPos0
       val stopPos       = startPos + cutLen0
       val matSpan       = Span(startPos, stopPos)
+      log(s"use random cut; matSpan = $matSpan / ${spanToTime(matSpan)}")
       val matDur        = matSpan.length / TimeRef.SampleRate
       val fadeInS       = rnd.nextDouble().linExp(0.0, 1.0, 1.0, matDur - 1.0)
       val fadeOutS      = math.min(matDur - fadeInS, rnd.nextDouble().linExp(0.0, 1.0, 1.0, matDur - 1.0))
@@ -586,6 +609,7 @@ object Layer {
       val region        = RegionAt(frame = startPos, span = matSpan, pause = None,
         fadeIn = fadeIn, fadeOut = fadeOut)
       val placed        = PlacedRegion(posTL = posTL, region = region)
+      log(s"placed = $placed")
       val placement     = placed :: Nil
 
       executePlacementAndMask(placement, gain = gainVal)
