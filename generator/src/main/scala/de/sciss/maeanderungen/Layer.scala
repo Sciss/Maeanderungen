@@ -378,6 +378,13 @@ object Layer {
     b.result()
   }
 
+  def executeReplacement[S <: Sys[S]](replace: Replacement[S], cueBg: AudioCue.Obj[S])(implicit tx: S#Tx): Unit = {
+    // - run through replace.map, removing keys (and links), and adding values (and links)
+    // - add cueBg and link
+    //
+    ???
+  }
+
   def executePlacementAndMask[S <: Sys[S]](placement: ISeq[PlacedRegion], gain: Double)
                                           (implicit tx: S#Tx, ctx: Context[S], config: Config): Future[Unit] = {
     log("executePlacementAndMask")
@@ -414,17 +421,9 @@ object Layer {
           }
         }
 
-//        val futMask = futBncFg.map(_ => ())
-
-        mapTx[S, CueSource[S], Unit](futMask) { implicit tx => _ =>
-          ???
+        mapTx[S, CueSource[S], Unit](futMask) { implicit tx => cueBgH =>
+          executeReplacement(replace, cueBgH())
         }
-
-        /*
-
-          - replace in ctx.tl (we need map data from copyForReplacementBounce)
-
-         */
       }
       futRender
     }
