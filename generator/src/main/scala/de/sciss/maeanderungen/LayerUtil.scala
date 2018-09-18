@@ -82,6 +82,7 @@ object LayerUtil {
   def mkAudioRegion[S <: Sys[S]](tl       : Timeline.Modifiable[S],
                                  time     : Span,
                                  audioCue : AudioCue.Obj[S],
+                                 pMain    : Proc[S],
                                  gOffset  : Long,
                                  fadeIn   : FadeSpec  = FadeSpec(0L),
                                  fadeOut  : FadeSpec  = FadeSpec(0L),
@@ -109,6 +110,7 @@ object LayerUtil {
     val sourceOpt = pTape.attr.get(Proc.attrSource)
     sourceOpt.foreach(source => p.attr.put(Proc.attrSource, source))
     p.graph() = pTape.graph()
+    p.name    = audioCue.value.artifact.base
 
     if (fadeIn.numFrames > 0L) {
       val fd    = FadeSpec.Obj.newVar[S](fadeIn)
@@ -129,7 +131,7 @@ object LayerUtil {
 
     tl.add(span, p)
     import ctx.cursor
-    Edits.addLink(source = out, sink = ctx.pMain, key = Proc.mainIn)
+    Edits.addLink(source = out, sink = /* ctx. */ pMain, key = Proc.mainIn)
 
     (span, p)
   }
@@ -236,10 +238,13 @@ object LayerUtil {
     p
   }
 
-  def copyForReplacementBounce[S <: Sys[S]](tl: Timeline[S], span: Span)(implicit tx: S#Tx, cursor: stm.Cursor[S]): Timeline[S] = {
+  def copyForReplacementBounce[S <: Sys[S]](tl: Timeline[S], span: Span)
+                                           (implicit tx: S#Tx, cursor: stm.Cursor[S]): (String, Timeline[S]) = {
     val res       = Timeline[S]
     val global    = tl.globalObjects.collect { case p: Proc[S] => p } .toList
     var globalMap = Map.empty[Proc[S], Proc[S]]
+    var name      = "unknown"
+    var nameSpan  = Span(0, 0)
 
     tl.intersect(span).foreach {
       case (eSpan @ Span(start, stop), entries) =>
@@ -284,6 +289,12 @@ object LayerUtil {
           }
 
           res.add(spanOut, objOut)
+          spanOut.value match {
+            case spanVal: Span if spanVal.length > nameSpan.length =>
+              name      = objOut.name
+              nameSpan  = spanVal
+            case _ =>
+          }
 
           (obj, objOut) match {
             case (objP: Proc[S], objOutP: Proc[S]) =>
@@ -307,7 +318,7 @@ object LayerUtil {
       case _ =>    // global proc
     }
 
-    res
+    (name, res)
   }
 
   def splitCopyObject[S <: Sys[S]](time: Long, oldSpan: SpanLikeObj[S], obj: Obj[S])

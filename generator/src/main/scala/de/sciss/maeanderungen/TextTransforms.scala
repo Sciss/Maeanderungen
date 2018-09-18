@@ -47,6 +47,7 @@ object TextTransforms {
     def done()(implicit tx: S#Tx): Future[stm.Source[S#Tx, AudioCue.Obj[S]]] = {
       val spec  = AudioFile.readSpec(fOut)
       val cue   = AudioCue.Obj(artOut, spec, offset = 0L, gain = 1.0)
+      cue.name  = nameOut
       fTrans.addLast(cue)
       val cueH  = tx.newHandle(cue)
       val fut   = Builder.createMetaData[S](cue)

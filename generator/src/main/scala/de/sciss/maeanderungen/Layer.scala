@@ -63,28 +63,88 @@ object Layer {
       s"$productPrefix(posTL = $posTL (${framesToTime(posTL)}), region = $region, relativeGain = $relativeGain)"
   }
 
-  final class Context[S <: Sys[S]](
-                                    val tl            : Timeline.Modifiable[S],
-                                    val tlNumFrames   : Long,
-                                    val category      : Category,
-                                    val material      : AudioCue.Obj[S],
-                                    val matNumFrames  : Long,
-                                    val loud95        : Double,
-                                    val pauses        : Vec[Pause],
-                                    val intelligible  : Boolean,
-                                    val complete      : Boolean,
-                                    val sequential    : Boolean,
-                                    val pan           : Double,
-                                    val pTape1        : Proc[S],
-                                    val pTape2        : Proc[S],
-                                    val pMain         : Proc[S],
-                                    val folderTemp    : Folder[S],
+  final case class PartialContext[S <: Sys[S]](
+                                                material      : AudioCue.Obj[S],
+                                                matNumFrames  : Long,
+                                                loud95        : Double,
+                                                pauses        : Vec[Pause],
+                                                intelligible  : Boolean,
+                                                complete      : Boolean,
+                                                sequential    : Boolean,
+                                              ) {
+
+    def copyTo(context: Context[S]): Context[S] = {
+      import context.{rnd, workspace, cursor}
+      context.copy(
+        material      = material,
+        matNumFrames  = matNumFrames,
+        loud95        = loud95,
+        pauses        = pauses,
+        intelligible  = intelligible,
+        complete      = complete,
+        sequential    = sequential
+      )
+    }
+  }
+
+  final case class Context[S <: Sys[S]](
+                                    tl            : Timeline.Modifiable[S],
+                                    tlNumFrames   : Long,
+                                    category      : Category,
+                                    material      : AudioCue.Obj[S],
+                                    matNumFrames  : Long,
+                                    loud95        : Double,
+                                    pauses        : Vec[Pause],
+                                    intelligible  : Boolean,
+                                    complete      : Boolean,
+                                    sequential    : Boolean,
+                                    pan           : Double,
+                                    pTape1        : Proc[S],
+                                    pTape2        : Proc[S],
+                                    pMain         : Proc[S],
+                                    folderTemp    : Folder[S],
     )(
       implicit val rnd: Random[S#Tx], val workspace: Workspace[S], val cursor: Cursor[S]
     )
 
   def log(what: => String): Unit =
     println(s"[log] $what")
+
+  def mkPartialContext[S <: Sys[S]](c: Category, mat: AudioCue.Obj[S])(implicit tx: S#Tx): PartialContext[S] = {
+    val mAttr         = mat.attr
+    val intelligible  = mAttr.$[BooleanObj](attrIntel ).fold(c.defaultIntelligible)(_.value)
+    val complete      = mAttr.$[BooleanObj]("K"       ).fold(c.defaultComplete    )(_.value)
+    val sequential    = mAttr.$[BooleanObj]("H"       ).fold(c.defaultSequential  )(_.value)
+
+    val pauses: Vec[Pause] = {
+      val tl = mat.attr.![Timeline](attrPauses)
+      val it = tl.iterator.flatMap {
+        case (span: Span, vec) =>
+          vec.collect {
+            case BiGroup.Entry(_, i: IntObj[S]) =>
+              val break = i.attr.$[BooleanObj](attrBreak).exists(_.value)
+              Pause(span = span, break = break)
+          }
+
+        case _ => Nil
+      }
+      it.toVector
+    }
+
+    val matV          = mat.value
+    val matNumFrames  = (matV.numFrames.toDouble / matV.sampleRate * TimeRef.SampleRate).toLong
+    val loud95        = mat.attr.![DoubleObj](attrLoud95).value
+
+    PartialContext(
+      material      = mat,
+      matNumFrames  = matNumFrames,
+      loud95        = loud95,
+      pauses        = pauses,
+      intelligible  = intelligible,
+      complete      = complete,
+      sequential    = sequential
+    )
+  }
 
   def process[S <: Sys[S]]()(implicit tx: S#Tx, workspace: Workspace[S], config: Config): Future[Unit] = {
     implicit val cursor: Cursor[S] = workspace.cursor
@@ -146,55 +206,34 @@ object Layer {
       case cue: AudioCue.Obj[S] if cue.name.contains /* startsWith */(c.abbrev) => cue
     } .toVector
 
-    val mat           = catMat.choose()
-    val matV          = mat.value
+    val mat     = catMat.choose()
+    val partial = mkPartialContext(c, mat)
+    val matV    = mat.value
 
     log(s"Material: ${matV.artifact.base}")
 
-    val mAttr         = mat.attr
-    val intelligible  = mAttr.$[BooleanObj](attrIntel ).fold(c.defaultIntelligible)(_.value)
-    val complete      = mAttr.$[BooleanObj]("K"       ).fold(c.defaultComplete    )(_.value)
-    val sequential    = mAttr.$[BooleanObj]("H"       ).fold(c.defaultSequential  )(_.value)
-    val transformable = !sequential // this is currently synonymous
+    val transformable = !partial.sequential // this is currently synonymous
     val transform     = transformable && {
       val prob = if (c.isText) config.probTransformText else config.probTransformSound
       prob.coin()
     }
-
-    val pauses: Vec[Pause] = {
-      val tl = mat.attr.![Timeline](attrPauses)
-      val it = tl.iterator.flatMap {
-        case (span: Span, vec) =>
-          vec.collect {
-            case BiGroup.Entry(_, i: IntObj[S]) =>
-              val break = i.attr.$[BooleanObj](attrBreak).exists(_.value)
-              Pause(span = span, break = break)
-          }
-
-        case _ => Nil
-      }
-      it.toVector
-    }
-
-    val matNumFrames  = (matV.numFrames.toDouble / matV.sampleRate * TimeRef.SampleRate).toLong
-    val loud95        = mat.attr.![DoubleObj](attrLoud95).value
 
     val pan = if ((matV.numChannels !== 1) || config.maxPan <= 0) 0.0 else {
       val x = rnd.nextDouble()
       x.linLin(0.0, 1.0, -config.maxPan, +config.maxPan)
     }
 
-    implicit val ctx: Context[S] = new Context(
+    implicit val ctx: Context[S] = Context(
       tl            = tl,
       tlNumFrames   = numFrames,
       category      = c,
-      material      = mat,
-      loud95        = loud95,
-      matNumFrames  = matNumFrames,
-      pauses        = pauses,
-      intelligible  = intelligible,
-      complete      = complete,
-      sequential    = sequential,
+      material      = partial.material,
+      loud95        = partial.loud95,
+      matNumFrames  = partial.matNumFrames,
+      pauses        = partial.pauses,
+      intelligible  = partial.intelligible,
+      complete      = partial.complete,
+      sequential    = partial.sequential,
       pan           = pan,
       pTape1        = pTape1,
       pTape2        = pTape2,
@@ -223,7 +262,14 @@ object Layer {
   }
 
   def putTransformedText[S <: Sys[S]]()(implicit tx: S#Tx, ctx: Context[S], config: Config): Future[Unit] = {
-    ???
+    import ctx.cursor
+    val futPch = TextTransforms.removePitch[S]()
+    flatMapTx[S, stm.Source[S#Tx, AudioCue.Obj[S]], Unit](futPch) { implicit tx => cueH =>
+      val cue     = cueH()
+      val partial = mkPartialContext(Category.HybridSound, cue)
+      val ctxNew  = partial.copyTo(ctx)
+      putPlainSoundFull()(tx, ctxNew, config)
+    }
   }
 
   def putTransformedSound[S <: Sys[S]]()(implicit tx: S#Tx, ctx: Context[S], config: Config): Future[Unit] = {
@@ -363,7 +409,7 @@ object Layer {
       var fT      = f
       while (exists) {
         count += 1
-        fT = f.replaceName(s"${f.base}-$count${f.ext}")
+        fT = f.replaceName(s"${f.base}-$count.${f.ext}")
         exists = fT.exists()
       }
       fT
@@ -376,12 +422,13 @@ object Layer {
     val tlFg = Timeline[S]
     tlFg.name = s"foreground ${new java.util.Date}"
     if (!config.deleteTempFiles) ctx.folderTemp.addLast(tlFg)
-    executePlacement[S](placement, gain = gain, target = tlFg)
+    val pMain = addDefaultGlobalProc(tlFg)
+    executePlacement[S](placement, gain = gain, target = tlFg, pMain = pMain)
     val tlFgSpans = groupWithinProximity(tlFg, maxDistanceSec = 1.0)
     val futAll: Vec[Future[Unit]] = tlFgSpans.map { case NamedSpan(tlFgSpan, nameFg) =>
       import ctx.cursor
       val spanFg    = widen(tlFgSpan, durSec = 0.5)
-      val tlBg      = copyForReplacementBounce(ctx.tl, spanFg)
+      val (nameBg, tlBg) = copyForReplacementBounce(ctx.tl, spanFg)
       tlBg.name = s"background ${new java.util.Date}"
       if (!config.deleteTempFiles) ctx.folderTemp.addLast(tlBg)
       val futRender = tlBg.span.nonEmptyOption.fold(Future.successful(())) { spanBg =>
@@ -390,19 +437,20 @@ object Layer {
         val union     = spanFg union spanBg
         val offFg     = spanFg.start - union.start
         val offBg     = spanBg.start - union.start
-        val numFrames = union.length
+        val numFrames = ((union.length * config.sampleRate) / TimeRef.SampleRate).toLong
+        log(s"spanFg = $spanFg (${spanToTime(spanFg)}), spanBg = $spanBg (${spanToTime(spanBg)}), numFrames = $numFrames / ${framesToTime(union.length)}")
         val dirOut    = config.baseDir / "audio_work" / "rendered"
         dirOut.mkdirs()
-        val fOut      = mkUnique(dirOut / s"$nameFg.aif")
+        val fOut      = mkUnique(dirOut / s"$nameFg-mask-$nameBg.aif")
 
-//        val futMask   = futBncFg.flatMap { fInFg =>
-//          flatMapTx[S, File, Unit](futBncBg) { implicit tx => fInBg =>
-//            SoundTransforms.run[S](fInFg = fInFg, offFg = offFg, fInBg = fInBg, offBg = offBg,
-//              numFrames = numFrames, fOut = fOut)
-//          }
-//        }
+        val futMask   = futBncFg.flatMap { fInFg =>
+          flatMapTx[S, File, Unit](futBncBg) { implicit tx => fInBg =>
+            SoundTransforms.runMask[S](fInFg = fInFg, offFg = offFg, fInBg = fInBg, offBg = offBg,
+              numFrames = numFrames, fOut = fOut)
+          }
+        }
 
-        val futMask = futBncFg.map(_ => ())
+//        val futMask = futBncFg.map(_ => ())
 
         futMask
 
@@ -418,13 +466,14 @@ object Layer {
     val futOne: Future[Vec[Unit]] = Future.sequence(futAll)
     import ctx.cursor
     mapTx[S, Vec[Unit], Unit](futOne) { implicit tx => _ =>
-      executePlacement[S](placement, gain = gain, target = ctx.tl)
+      executePlacement[S](placement, gain = gain, target = ctx.tl, pMain = ctx.pMain)
     }
   }
 
-  def executePlacement[S <: Sys[S]](placement: ISeq[PlacedRegion], gain: Double, target: Timeline.Modifiable[S])
+  def executePlacement[S <: Sys[S]](placement: ISeq[PlacedRegion], gain: Double, target: Timeline.Modifiable[S],
+                                    pMain: Proc[S])
                                    (implicit tx: S#Tx, ctx: Context[S], config: Config): Unit = {
-    import ctx._
+    import ctx.{pMain => _, _}
     val vec       = placement.toVector
     val intelObj  = BooleanObj.newVar[S](intelligible)
     val colorVal  = mkColor(material)
@@ -454,8 +503,8 @@ object Layer {
       val gOffset = placed.region.span.start - fadeIn.numFrames
       val spanTL  = Span(startTL, stopTL)
       val gainVal = gain * placed.relativeGain
-      val (_, pr)  = mkAudioRegion(target, time = spanTL, audioCue = material, gOffset = gOffset,
-        fadeIn = fadeIn, fadeOut = fadeOut, gain = gainVal)
+      val (_, pr)  = mkAudioRegion(target, time = spanTL, audioCue = material, pMain = pMain,
+        gOffset = gOffset, fadeIn = fadeIn, fadeOut = fadeOut, gain = gainVal)
       val prAttr = pr.attr
       prAttr.put(attrIntel, intelObj)
       prAttr.put(ObjView.attrColor, /* Color.Obj.newVar( */ colorVal /* ) */)

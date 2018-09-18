@@ -25,11 +25,13 @@ import scala.concurrent.{Future, Promise}
 import scala.util.control.NonFatal
 
 object SoundTransforms {
-  def run[S <: Sys[S]](fInFg: File, offFg: Long, fInBg: File, offBg: Long, numFrames: Long, fOut: File)
-                      (implicit tx: S#Tx, ctx: Context[S], config: Config): Future[Unit] = {
+  def runMask[S <: Sys[S]](fInFg: File, offFg: Long, fInBg: File, offBg: Long, numFrames: Long, fOut: File)
+                          (implicit tx: S#Tx, ctx: Context[S], config: Config): Future[Unit] = {
 
     val specFg = AudioFile.readSpec(fInFg)
     val specBg = AudioFile.readSpec(fInBg)
+
+    println(s"runMask: fg: $specFg, bg: $specBg, offFg $offFg, offBg $offBg, numFrames $numFrames")
 
     val g = Graph {
       import de.sciss.fscape.graph._
@@ -52,7 +54,7 @@ object SoundTransforms {
 
       val inBg       = mkBgIn()
       val fMin      = 50.0
-      val sr        = 48000.0
+      val sr        = config.sampleRate.toDouble // 48000.0
       val winSizeH  = ((sr / fMin) * 3).ceil.toInt / 2
       val winSize   = winSizeH * 2
       val stepSize  = winSize / 2
@@ -127,7 +129,10 @@ object SoundTransforms {
 
       val writtenFlt = AudioFileOut(convLap, fOut, AudioFileSpec(numChannels = config.numChannels, sampleRate = sr))
       // writtenFlt.poll(sr * 10, "frames-flt")
-      Progress(writtenFlt / numFrames, Metro(specFg.sampleRate))
+      val prog  = writtenFlt / numFrames
+      val progT = Metro(specFg.sampleRate)
+//      prog.poll(progT, "prog")
+      Progress(prog, progT)
     }
 
     val res = Promise[Unit]()
@@ -135,6 +140,15 @@ object SoundTransforms {
     tx.afterCommit {
       val config = stream.Control.Config()
       config.useAsync = false
+      var lastProg = 0
+      println("_" * 100)
+      config.progressReporter = { rep =>
+        val prog = (rep.total * 100).toInt
+        while (lastProg < prog) {
+          print('#')
+          lastProg += 1
+        }
+      }
       implicit val ctrl: stream.Control = stream.Control(config)
       try {
         ctrl.run(g)
