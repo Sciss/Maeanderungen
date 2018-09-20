@@ -16,7 +16,9 @@ package de.sciss.maeanderungen
 import de.sciss.file._
 import de.sciss.fscape.Graph
 import de.sciss.fscape.graph._
+import de.sciss.kollflitz.Vec
 import de.sciss.lucre.stm
+import de.sciss.lucre.stm.{Random, Source, TxnLike}
 import de.sciss.lucre.synth.Sys
 import de.sciss.maeanderungen.Layer.Context
 import de.sciss.synth.io.{AudioFile, AudioFileSpec}
@@ -25,6 +27,25 @@ import de.sciss.synth.proc.AudioCue
 import scala.concurrent.Future
 
 object TextTransforms {
+  val weighted: Vec[(Double, Transform)] = Util.normalizeWeights(Vec(
+    0.8 -> Transform.RemovePitch,
+  ))
+
+  def choose[Tx <: TxnLike]()(implicit tx: Tx, r: Random[Tx]): Transform = {
+    import Ops._
+    weighted.chooseWeighted(_._1)._2
+  }
+
+  object Transform {
+    case object RemovePitch extends Transform {
+      def make[S <: Sys[S]]()(implicit tx: S#Tx, ctx: Context[S]): Future[Source[S#Tx, AudioCue.Obj[S]]] =
+        mkRemovePitch[S]()
+    }
+  }
+  sealed trait Transform {
+    def make[S <: Sys[S]]()(implicit tx: S#Tx, ctx: Context[S]): Future[stm.Source[S#Tx, AudioCue.Obj[S]]]
+  }
+
   def mkRemovePitch[S <: Sys[S]]()(implicit tx: S#Tx, ctx: Context[S]): Future[stm.Source[S#Tx, AudioCue.Obj[S]]] = {
     import ctx._
     val matVal    = material.value

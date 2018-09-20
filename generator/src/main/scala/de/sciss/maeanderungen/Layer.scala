@@ -178,7 +178,7 @@ object Layer {
     }
 
     val seed0: LongObj.Var[S] = tl.attr.$[LongObj](attrSeed) match {
-      case Some(LongObj.Var(vr)) => vr
+      case Some(LongObj.Var(vr)) if !config.forceSeed => vr
       case _ =>
         val _seed = LongObj.newVar[S](config.seed.getOrElse(now): Long)
         tl.attr.put(attrSeed, _seed)
@@ -268,9 +268,11 @@ object Layer {
   }
 
   def putTransformedText[S <: Sys[S]]()(implicit tx: S#Tx, ctx: Context[S], config: Config): Future[Unit] = {
-    import ctx.cursor
-    val futPch = TextTransforms.mkRemovePitch[S]()
-    flatMapTx[S, stm.Source[S#Tx, AudioCue.Obj[S]], Unit](futPch) { implicit tx => cueH =>
+    import ctx.{cursor, rnd}
+    val t = TextTransforms.choose()
+    log(s"putTransformedText - $t")
+    val futT = t.make[S]()
+    flatMapTx[S, stm.Source[S#Tx, AudioCue.Obj[S]], Unit](futT) { implicit tx =>cueH =>
       val cue     = cueH()
       val partial = mkPartialContext(Category.HybridSound, cue)
       val ctxNew  = partial.copyTo(ctx)

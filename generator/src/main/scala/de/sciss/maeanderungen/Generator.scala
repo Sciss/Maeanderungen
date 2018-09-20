@@ -114,6 +114,10 @@ object Generator {
       opt[Unit]("backup")
         .text("Backup workspace before modification")
         .action { (_, c) => c.copy(backupWorkspace = true) }
+
+      opt[Unit]("force-seed")
+        .text("Force re-seeding of RNG")
+        .action { (_, c) => c.copy(forceSeed = true) }
     }
     p.parse(args, default).fold(sys.exit(1)) { implicit config => run() }
   }

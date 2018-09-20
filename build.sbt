@@ -3,7 +3,7 @@ lazy val baseNameL  = baseName.toLowerCase
 
 lazy val commonSettings = Seq(
   name         := "Maeanderungen",
-  version      := "0.2.1-SNAPSHOT",
+  version      := "0.3.0",
   description  := "An algorithmic art project",
   organization := "de.sciss",
   homepage     := Some(url(s"https://github.com/Sciss/${name.value}")),
@@ -64,7 +64,7 @@ lazy val generator = project.withId(s"$baseNameL-generator").in(file("generator"
     libraryDependencies ++= Seq(
       "de.sciss"          %% "mellite"          % "2.27.1",
       "de.sciss"          %% "soundprocesses"   % "3.21.1",
-      "de.sciss"          %% "fscape"           % "2.17.1",
+      "de.sciss"          %% "fscape"           % "2.17.3-SNAPSHOT",
       "de.sciss"          %% "travelling-ants"  % "0.1.1",
       "de.sciss"          %% "poirot"           % "0.3.0",
       "com.github.scopt"  %% "scopt"            % "3.7.0"
