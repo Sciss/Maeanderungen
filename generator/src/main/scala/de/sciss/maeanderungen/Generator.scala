@@ -112,12 +112,13 @@ object Generator {
         type S = Durable
         implicit val _d: Workspace.Durable = d
 
+        println("Rendering...")
+
         val futRender: Future[Unit] = d.system.step { implicit tx =>
           if (config.prepare) Preparation .process[S]()
           if (config.render ) Layer       .process[S]() else Future.successful(())
         }
 
-        println("Rendering...")
         try {
           Await.result(futRender, Duration.Inf)
         } finally {

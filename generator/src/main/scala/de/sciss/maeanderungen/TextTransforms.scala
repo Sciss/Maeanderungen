@@ -14,16 +14,15 @@
 package de.sciss.maeanderungen
 
 import de.sciss.file._
+import de.sciss.fscape.Graph
 import de.sciss.fscape.graph._
-import de.sciss.fscape.{Graph, stream}
 import de.sciss.lucre.stm
 import de.sciss.lucre.synth.Sys
 import de.sciss.maeanderungen.Layer.Context
 import de.sciss.synth.io.{AudioFile, AudioFileSpec}
 import de.sciss.synth.proc.AudioCue
 
-import scala.concurrent.{Future, Promise}
-import scala.util.control.NonFatal
+import scala.concurrent.Future
 
 object TextTransforms {
   final val DEFAULT_VERSION = 1
@@ -86,22 +85,6 @@ object TextTransforms {
       AudioFileOut(sigOut, fOut, AudioFileSpec(numChannels = 1, sampleRate = sampleRate))
     }
 
-    val res = Promise[Unit]()
-
-    tx.afterCommit {
-      val config = stream.Control.Config()
-      config.useAsync = false
-      implicit val ctrl: stream.Control = stream.Control(config)
-      try {
-        ctrl.run(g)
-      } catch {
-        case NonFatal(ex) =>
-          res.failure(ex)
-          throw ex
-      }
-      res.tryCompleteWith(ctrl.status)
-    }
-
-    res.future
+    LayerUtil.renderFsc[S](g)
   }
 }

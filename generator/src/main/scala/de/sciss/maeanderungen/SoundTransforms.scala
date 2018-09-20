@@ -14,17 +14,16 @@
 package de.sciss.maeanderungen
 
 import de.sciss.equal.Implicits._
-import de.sciss.file.File
-import de.sciss.numbers.Implicits._
-import de.sciss.fscape.{GE, Graph, stream}
+import de.sciss.file._
+import de.sciss.fscape.{GE, Graph, graph}
 import de.sciss.lucre.stm
 import de.sciss.lucre.synth.Sys
 import de.sciss.maeanderungen.Layer.Context
+import de.sciss.numbers.Implicits._
 import de.sciss.synth.io.{AudioFile, AudioFileSpec}
 import de.sciss.synth.proc.AudioCue
 
-import scala.concurrent.{Future, Promise}
-import scala.util.control.NonFatal
+import scala.concurrent.Future
 
 object SoundTransforms {
   def mkMask[S <: Sys[S]](fInFg: File, offFg: Long, fInBg: File, offBg: Long, numFrames: Long, nameOut: String /* fOut: File */)
@@ -35,12 +34,15 @@ object SoundTransforms {
   }
 
   private def runMask[S <: Sys[S]](fInFg: File, offFg: Long, fInBg: File, offBg: Long, numFrames: Long, fOut: File)
-                          (implicit tx: S#Tx, ctx: Context[S], config: Config): Future[Unit] = {
+                          (implicit tx: S#Tx, config: Config): Future[Unit] = {
 
     val specFg = AudioFile.readSpec(fInFg)
     val specBg = AudioFile.readSpec(fInBg)
 
-    println(s"runMask: fg: $specFg, bg: $specBg, offFg $offFg, offBg $offBg, numFrames $numFrames")
+    assert(specFg.numFrames + offFg <= numFrames)
+    assert(specBg.numFrames + offBg <= numFrames)
+
+    println(s"runMask: fInFg: ${fInFg.name}, fInBg: ${fInBg.name}, fg: $specFg, bg: $specBg, offFg $offFg, offBg $offBg, numFrames $numFrames")
 
     val g = Graph {
       import de.sciss.fscape.graph._
@@ -53,7 +55,8 @@ object SoundTransforms {
           val pad = numFrames - (off + spec.numFrames)
           in0 ++ DC(0.0).take(pad)
         }
-        if (off === 0L) in1 else DC(0.0).take(off) ++ in1
+        val in2 = if (off === 0L) in1 else DC(0.0).take(off) ++ in1
+        in2 // .elastic()
       }
 
       def mkFgIn(): GE = mkIn(fInFg, specFg, offFg)
@@ -61,7 +64,7 @@ object SoundTransforms {
 
       def mkBgIn(): GE = mkIn(fInBg, specBg, offBg)
 
-      val inBg       = mkBgIn()
+      val inBg      = mkBgIn()
       val fMin      = 50.0
       val sr        = config.sampleRate.toDouble // 48000.0
       val winSizeH  = ((sr / fMin) * 3).ceil.toInt / 2
@@ -81,10 +84,10 @@ object SoundTransforms {
       val in1Mag    = in1F.complex.mag
       val in2Mag    = in2F.complex.mag
 
-      val blurTime  = ((2.0 /* 0.5 */ * sr) / stepSize).ceil.toInt
-      val blurFreq  = (200.0 /* 150.0 */ / (sr / fftSize)).ceil.toInt
+      val blurTime  = ((2.0 * sr) / stepSize) .ceil.toInt
+      val blurFreq  = (200.0 / (sr / fftSize)).ceil.toInt
       val columns   = blurTime * 2 + 1
-      def post      = DC(0).take(blurTime * fftSizeH)
+      def post      = DC(0.0).take(blurTime * fftSizeH)
       val in1Pad    = in1Mag ++ post
       val in2Pad    = in2Mag ++ post
 
@@ -97,7 +100,7 @@ object SoundTransforms {
 
       // RunningMax(mask < 1.0).last.poll(0, "has-filter?")
 
-      val maskC     = mask zip DC(0)
+      val maskC     = mask zip DC(0.0)
       val fltSym    = (Real1IFFT(maskC, size = fftSize) / fftSizeH).drop(blurTime * fftSize)
 
       //    Plot1D(flt.drop(fftSize * 16), size = fftSize)
@@ -126,7 +129,7 @@ object SoundTransforms {
       // val writtenMin = AudioFileOut(fltMin, fOutMin, AudioFileSpec(numChannels = 1, sampleRate = sr))
       // writtenMin.poll(sr * 10, "frames-min")
 
-      val bg        = mkBgIn().take(numFrames)
+      val bg        = mkBgIn() // .take(numFrames)
       val bgS       = Sliding(bg, size = winSize, step = stepSize)
       val bgW       = bgS * GenWindow(winSize, shape = GenWindow.Hann)
       val convSize  = (winSize + fftSize - 1).nextPowerOfTwo
@@ -135,8 +138,9 @@ object SoundTransforms {
       val convF     = bgF.complex * fltMinFF
       val conv      = Real1IFFT(convF, convSize) * convSize
       val convLap   = OverlapAdd(conv, convSize, stepSize).take(numFrames)
+      val sigOut    = convLap // .elastic()
 
-      val writtenFlt = AudioFileOut(convLap, fOut, AudioFileSpec(numChannels = config.numChannels, sampleRate = sr))
+      val writtenFlt = AudioFileOut(sigOut, fOut, AudioFileSpec(numChannels = config.numChannels, sampleRate = sr))
       // writtenFlt.poll(sr * 10, "frames-flt")
       val prog  = writtenFlt / numFrames
       val progT = Metro(specFg.sampleRate)
@@ -144,31 +148,40 @@ object SoundTransforms {
       Progress(prog, progT)
     }
 
-    val res = Promise[Unit]()
+    LayerUtil.renderFsc[S](g)
+  }
 
-    tx.afterCommit {
-      val config = stream.Control.Config()
-      config.useAsync = false
-      var lastProg = 0
-      println("_" * 100)
-      config.progressReporter = { rep =>
-        val prog = (rep.total * 100).toInt
-        while (lastProg < prog) {
-          print('#')
-          lastProg += 1
-        }
-      }
-      implicit val ctrl: stream.Control = stream.Control(config)
-      try {
-        ctrl.run(g)
-      } catch {
-        case NonFatal(ex) =>
-          res.failure(ex)
-          throw ex
-      }
-      res.tryCompleteWith(ctrl.status)
+  def mkBleach[S <: Sys[S]]()(implicit tx: S#Tx, ctx: Context[S]): Future[stm.Source[S#Tx, AudioCue.Obj[S]]] = {
+    import ctx._
+    val matVal    = material.value
+    val base      = matVal.artifact.base
+    val nameOut   = s"$base-Trns-Bleach.aif"
+    LayerUtil.mkTransform(nameOut) { fOut =>
+      runBleach(fOut = fOut)
+    }
+  }
+
+  private def runBleach[S <: Sys[S]](fOut: File)(implicit tx: S#Tx, ctx: Context[S]): Future[Unit] = {
+    val matVal              = ctx.material.value
+    val fIn                 = matVal.artifact
+    val specIn              = AudioFile.readSpec(fIn)
+    import specIn.{sampleRate, numFrames}
+
+    val g = Graph {
+      import graph._
+      def mkIn() = AudioFileIn(file = fIn, numChannels = 1)
+
+      val in          = mkIn()
+      val fltLen      = 441
+      val feedback    = -50.0.dbAmp
+      val clip        =  18.0.dbAmp
+      val sigOut      = Bleach(in, filterLen = fltLen, feedback = feedback, filterClip = clip)
+      val writtenFlt  = AudioFileOut(sigOut, fOut, AudioFileSpec(numChannels = 1, sampleRate = sampleRate))
+      val prog        = writtenFlt / numFrames
+      val progT       = Metro(sampleRate)
+      Progress(prog, progT)
     }
 
-    res.future
+    LayerUtil.renderFsc[S](g)
   }
 }

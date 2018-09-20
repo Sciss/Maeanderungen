@@ -27,14 +27,14 @@ import de.sciss.lucre.synth.Sys
 import de.sciss.maeanderungen.Builder._
 import de.sciss.maeanderungen.LayerUtil._
 import de.sciss.maeanderungen.Ops._
+import de.sciss.maeanderungen.Util.{framesToTime, spanToTime}
 import de.sciss.mellite.gui.ObjView
+import de.sciss.mellite.gui.edit.Edits
 import de.sciss.numbers.Implicits._
 import de.sciss.span.Span
 import de.sciss.synth.Curve
 import de.sciss.synth.proc.Implicits._
-import de.sciss.synth.proc.{AudioCue, FadeSpec, Proc, TimeRef, Timeline, Workspace}
-import de.sciss.synth.proc.SoundProcesses
-import Util.{spanToTime, framesToTime}
+import de.sciss.synth.proc.{AudioCue, FadeSpec, Proc, SoundProcesses, TimeRef, Timeline, Workspace}
 
 import scala.annotation.tailrec
 import scala.concurrent.Future
@@ -74,7 +74,7 @@ object Layer {
                                               ) {
 
     def copyTo(context: Context[S]): Context[S] = {
-      import context.{rnd, workspace, cursor}
+      import context.{cursor, rnd, workspace}
       context.copy(
         material      = material,
         matNumFrames  = matNumFrames,
@@ -273,7 +273,15 @@ object Layer {
   }
 
   def putTransformedSound[S <: Sys[S]]()(implicit tx: S#Tx, ctx: Context[S], config: Config): Future[Unit] = {
-    ???
+    log("putTransformedSound")
+    import ctx.cursor
+    val futPch = SoundTransforms.mkBleach[S]()
+    flatMapTx[S, stm.Source[S#Tx, AudioCue.Obj[S]], Unit](futPch) { implicit tx => cueH =>
+      val cue     = cueH()
+      val partial = mkPartialContext(Category.HybridSound, cue)
+      val ctxNew  = partial.copyTo(ctx)
+      putPlainSoundFull()(tx, ctxNew, config)
+    }
   }
 
   def putPlainText[S <: Sys[S]]()(implicit tx: S#Tx, ctx: Context[S], config: Config): Future[Unit] = {
@@ -378,11 +386,48 @@ object Layer {
     b.result()
   }
 
-  def executeReplacement[S <: Sys[S]](replace: Replacement[S], cueBg: AudioCue.Obj[S])(implicit tx: S#Tx): Unit = {
-    // - run through replace.map, removing keys (and links), and adding values (and links)
-    // - add cueBg and link
-    //
-    ???
+  def executeReplacement[S <: Sys[S]](replace: Replacement[S], cueBg: AudioCue.Obj[S], offCue: Long)
+                                     (implicit tx: S#Tx, ctx: Context[S]): Unit = {
+    import ctx.cursor
+    replace.map.foreach {
+      case (oldEntry, newList) =>
+        oldEntry match {
+          case pOut: Proc[S] =>
+            ctx.tl.globalObjects.foreach {
+              case pIn: Proc[S] =>
+                Edits.findLink(out = pOut, in = pIn).foreach { lnk =>
+                  Edits.removeLink(lnk)
+                }
+              case _ =>
+            }
+          case _ =>
+        }
+        ctx.tl.remove(oldEntry.span, oldEntry.value)
+        newList.foreach {
+          case (spanNew, objNew) =>
+            ctx.tl.add(spanNew, objNew)
+            objNew match {
+              case pNew: Proc[S] =>
+                val out = pNew.outputs.add(Proc.mainOut)
+                Edits.addLink(source = out, sink = ctx.pMain, key = Proc.mainIn)
+              case _ =>
+            }
+        }
+    }
+
+    val cueVal = cueBg.value
+    val numFramesTL = (cueVal.numFrames * TimeRef.SampleRate / cueVal.sampleRate).toLong
+    val spanTL = Span(offCue, offCue + numFramesTL)
+    val (_, pBg) = mkAudioRegion[S](tl = ctx.tl, time = spanTL, audioCue = cueBg, pMain = ctx.pMain,
+      gOffset = 0L, gain = 1.0)
+    replace.map.headOption.foreach {
+      case (e, _) =>
+        val pOld = e.value
+        pOld.attr.iterator.foreach {
+          case (key, value) if key === "color" => pBg.attr.put(key, value)
+          case _ =>
+        }
+    }
   }
 
   def executePlacementAndMask[S <: Sys[S]](placement: ISeq[PlacedRegion], gain: Double)
@@ -399,15 +444,15 @@ object Layer {
       import ctx.cursor
       val spanFg    = widen(tlFgSpan, durSec = 0.5)
       val replace   = copyForReplacementBounce(ctx.tl, spanFg)
-      import replace.{tlBg, nameBg}
+      import replace.{nameBg, tlBg}
       tlBg.name = s"background ${new java.util.Date}"
       if (!config.deleteTempFiles) ctx.folderTemp.addLast(tlBg)
       val futRender = tlBg.span.nonEmptyOption.fold(Future.successful(())) { spanBg =>
         val futBncFg  = bounceTemp[S](tlFg, spanFg )
         val futBncBg  = bounceTemp[S](tlBg, spanBg)
         val union     = spanFg union spanBg
-        val offFg     = spanFg.start - union.start
-        val offBg     = spanBg.start - union.start
+        val offFg     = (((spanFg.start - union.start) * config.sampleRate) / TimeRef.SampleRate).toLong
+        val offBg     = (((spanBg.start - union.start) * config.sampleRate) / TimeRef.SampleRate).toLong
         val numFrames = ((union.length * config.sampleRate) / TimeRef.SampleRate).toLong
         log(s"spanFg = $spanFg (${spanToTime(spanFg)}), spanBg = $spanBg (${spanToTime(spanBg)}), numFrames = $numFrames / ${framesToTime(union.length)}")
         val dirOut    = config.baseDir / "audio_work" / "rendered"
@@ -422,7 +467,7 @@ object Layer {
         }
 
         mapTx[S, CueSource[S], Unit](futMask) { implicit tx => cueBgH =>
-          executeReplacement(replace, cueBgH())
+          executeReplacement(replace, cueBgH(), offCue = union.start)
         }
       }
       futRender
@@ -468,7 +513,8 @@ object Layer {
       val gOffset = placed.region.span.start - fadeIn.numFrames
       val spanTL  = Span(startTL, stopTL)
       val gainVal = gain * placed.relativeGain
-      val (_, pr)  = mkAudioRegion[S](target, time = spanTL, audioCue = material, pMain = pMain,
+      val mat: AudioCue.Obj[S] = material // help IntelliJ, WTF
+      val (_, pr)  = mkAudioRegion[S](target, time = spanTL, audioCue = mat, pMain = pMain,
         gOffset = gOffset, fadeIn = fadeIn, fadeOut = fadeOut, gain = gainVal)
       val prAttr = pr.attr
       prAttr.put(attrIntel, intelObj)
@@ -586,7 +632,9 @@ object Layer {
   }
 
   def putPlainSoundFull[S <: Sys[S]]()(implicit tx: S#Tx, ctx: Context[S], config: Config): Future[Unit] = {
+    log("putPlainSoundFull")
     val matSpan = Span(0L, ctx.matNumFrames)
+    log(s"matSpan = $matSpan / ${spanToTime(matSpan)}")
     putPlainSoundIntel(matSpan)
   }
 
@@ -632,6 +680,7 @@ object Layer {
   def putPlainSoundIntel[S <: Sys[S]](matSpan: Span)(implicit tx: S#Tx, ctx: Context[S], config: Config): Future[Unit] = {
     import ctx._
     val placementOpt  = tryPlacePlainIntel[S](matSpan = matSpan)
+    log(s"placementOpt = $placementOpt")
     val gainVal       = (65.0 - loud95).dbAmp // XXX TODO --- we should probably take loud50 into account as well
     placementOpt.fold(Future.successful(())) { placement =>
       executePlacementAndMask(placement, gain = gainVal)

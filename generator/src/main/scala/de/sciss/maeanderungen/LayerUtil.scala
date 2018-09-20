@@ -15,6 +15,7 @@ package de.sciss.maeanderungen
 
 import de.sciss.equal.Implicits._
 import de.sciss.file._
+import de.sciss.fscape.{Graph, stream}
 import de.sciss.kollflitz.Vec
 import de.sciss.lucre.artifact.{Artifact, ArtifactLocation}
 import de.sciss.lucre.bitemp.BiGroup
@@ -422,7 +423,7 @@ object LayerUtil {
                                               (run: File => Future[Unit])
                                               (implicit tx: S#Tx, ctx: Context[S]): FutCue[S] = {
     import SoundProcesses.executionContext
-    import ctx.{workspace, cursor}
+    import ctx.{cursor, workspace}
     val root      = workspace.root
     val folderOut = Builder.mkFolder(root, folderName)
     val loc       = root.![ArtifactLocation]("base")
@@ -451,5 +452,41 @@ object LayerUtil {
         done()
       }
     }
+  }
+
+  def renderFsc[S <: Sys[S]](g: Graph)(implicit tx: S#Tx): Future[Unit] = {
+    val res = Promise[Unit]()
+
+    tx.afterCommit {
+      val config = stream.Control.Config()
+      config.useAsync = false
+      var lastProg = 0
+      println("_" * 100)
+      config.progressReporter = { rep =>
+        val prog = (rep.total * 100).toInt
+        while (lastProg < prog) {
+          print('#')
+          lastProg += 1
+        }
+      }
+
+      implicit val ctrl: stream.Control = stream.Control(config)
+//      Swing.onEDT {
+//        SimpleGUI(ctrl)
+//      }
+
+      ctrl.status.foreach(_ => println())(config.executionContext)
+
+      try {
+        ctrl.run(g)
+        res.tryCompleteWith(ctrl.status)
+      } catch {
+        case NonFatal(ex) =>
+          res.failure(ex)
+          // throw ex
+      }
+    }
+
+    res.future
   }
 }
