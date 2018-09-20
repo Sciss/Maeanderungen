@@ -39,10 +39,10 @@ object SoundTransforms {
     val specFg = AudioFile.readSpec(fInFg)
     val specBg = AudioFile.readSpec(fInBg)
 
-    assert(specFg.numFrames + offFg <= numFrames)
-    assert(specBg.numFrames + offBg <= numFrames)
-
     println(s"runMask: fInFg: ${fInFg.name}, fInBg: ${fInBg.name}, fg: $specFg, bg: $specBg, offFg $offFg, offBg $offBg, numFrames $numFrames")
+
+    assert(specFg.numFrames + offFg <= numFrames + 2) // + 2 because of sample rate conversion round-off errors
+    assert(specBg.numFrames + offBg <= numFrames + 2) // + 2 because of sample rate conversion round-off errors
 
     val g = Graph {
       import de.sciss.fscape.graph._
@@ -151,31 +151,32 @@ object SoundTransforms {
     LayerUtil.renderFsc[S](g)
   }
 
-  def mkBleach[S <: Sys[S]]()(implicit tx: S#Tx, ctx: Context[S]): Future[stm.Source[S#Tx, AudioCue.Obj[S]]] = {
+  def mkBleach[S <: Sys[S]](inverse: Boolean)(implicit tx: S#Tx, ctx: Context[S]): Future[stm.Source[S#Tx, AudioCue.Obj[S]]] = {
     import ctx._
     val matVal    = material.value
     val base      = matVal.artifact.base
-    val nameOut   = s"$base-Trns-Bleach.aif"
+    val inverseS  = if (inverse) "I" else ""
+    val nameOut   = s"$base-Trns-Bleach$inverseS.aif"
     LayerUtil.mkTransform(nameOut) { fOut =>
-      runBleach(fOut = fOut)
+      runBleach(fOut = fOut, inverse = inverse)
     }
   }
 
-  private def runBleach[S <: Sys[S]](fOut: File)(implicit tx: S#Tx, ctx: Context[S]): Future[Unit] = {
-    val matVal              = ctx.material.value
-    val fIn                 = matVal.artifact
-    val specIn              = AudioFile.readSpec(fIn)
+  private def runBleach[S <: Sys[S]](fOut: File, inverse: Boolean)(implicit tx: S#Tx, ctx: Context[S]): Future[Unit] = {
+    val matVal  = ctx.material.value
+    val fIn     = matVal.artifact
+    val specIn  = AudioFile.readSpec(fIn)
     import specIn.{sampleRate, numFrames}
 
     val g = Graph {
       import graph._
-      def mkIn() = AudioFileIn(file = fIn, numChannels = 1)
-
+      def mkIn()      = AudioFileIn(file = fIn, numChannels = 1)
       val in          = mkIn()
       val fltLen      = 441
       val feedback    = -50.0.dbAmp
       val clip        =  18.0.dbAmp
-      val sigOut      = Bleach(in, filterLen = fltLen, feedback = feedback, filterClip = clip)
+      val sig0        = Bleach(in, filterLen = fltLen, feedback = feedback, filterClip = clip)
+      val sigOut      = if (!inverse) sig0 else in.elastic() - sig0
       val writtenFlt  = AudioFileOut(sigOut, fOut, AudioFileSpec(numChannels = 1, sampleRate = sampleRate))
       val prog        = writtenFlt / numFrames
       val progT       = Metro(sampleRate)

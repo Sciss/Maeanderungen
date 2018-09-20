@@ -28,6 +28,7 @@ import de.sciss.maeanderungen.Ops._
 import de.sciss.mellite.ProcActions
 import de.sciss.mellite.gui.ActionBounceTimeline
 import de.sciss.mellite.gui.edit.Edits
+import de.sciss.mellite.util.Gain
 import de.sciss.span.Span
 import de.sciss.synth
 import de.sciss.synth.io.{AudioFile, SampleFormat}
@@ -398,8 +399,13 @@ object LayerUtil {
       val fTmp            = File.createTempIn(dirTmp, suffix = ".aif", deleteOnExit = config.deleteTempFiles)
       sCfg.nrtOutputPath  = fTmp.path
       val settings        = ActionBounceTimeline.PerformSettings[S](
-        realtime = false, fileFormat = ActionBounceTimeline.FileFormat.PCM(sampleFormat = SampleFormat.Float),
-        group = tlH :: Nil, server = sCfg, span = span, channels = Vec(0 to (config.numChannels - 1))
+        gain        = Gain.immediate(0f),
+        realtime    = false,
+        fileFormat  = ActionBounceTimeline.FileFormat.PCM(sampleFormat = SampleFormat.Float),
+        group       = tlH :: Nil,
+        server      = sCfg,
+        span        = span,
+        channels    = Vec(0 to (config.numChannels - 1))
       )
       tryCompleteWith(p)(ActionBounceTimeline.perform(ctx.workspace, settings))
     }

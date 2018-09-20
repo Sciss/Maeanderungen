@@ -268,21 +268,30 @@ object Layer {
       val cue     = cueH()
       val partial = mkPartialContext(Category.HybridSound, cue)
       val ctxNew  = partial.copyTo(ctx)
-      // XXX TODO: does not need to be full
-      putPlainSoundFull()(tx, ctxNew, config)
+
+      if (ctx.complete) {
+        putPlainSoundFull ()(tx, ctxNew, config)
+      } else {
+        putPlainSoundCut  ()(tx, ctxNew, config)
+      }
     }
   }
 
   def putTransformedSound[S <: Sys[S]]()(implicit tx: S#Tx, ctx: Context[S], config: Config): Future[Unit] = {
     log("putTransformedSound")
-    import ctx.cursor
-    val futPch = SoundTransforms.mkBleach[S]()
+    import ctx.{cursor, rnd}
+    val bleachInverse = 0.5.coin()
+    val futPch = SoundTransforms.mkBleach[S](inverse = bleachInverse)
     flatMapTx[S, stm.Source[S#Tx, AudioCue.Obj[S]], Unit](futPch) { implicit tx => cueH =>
       val cue     = cueH()
       val partial = mkPartialContext(Category.HybridSound, cue)
       val ctxNew  = partial.copyTo(ctx)
-      // XXX TODO: does not need to be full
-      putPlainSoundFull()(tx, ctxNew, config)
+
+      if (ctx.complete) {
+        putPlainSoundFull ()(tx, ctxNew, config)
+      } else {
+        putPlainSoundCut  ()(tx, ctxNew, config)
+      }
     }
   }
 
@@ -421,7 +430,7 @@ object Layer {
     val numFramesTL = (cueVal.numFrames * TimeRef.SampleRate / cueVal.sampleRate).toLong
     val spanTL = Span(offCue, offCue + numFramesTL)
     val (_, pBg) = mkAudioRegion[S](tl = ctx.tl, time = spanTL, audioCue = cueBg, pMain = ctx.pMain,
-      gOffset = 0L, gain = 0.5 /* 1.0 */) // XXX TODO where does the gain factor come from?
+      gOffset = 0L, gain = 1.0 /* 0.5 */) // XXX TODO where does the gain factor come from?
     replace.map.headOption.foreach {
       case (e, _) =>
         val pOld = e.value
@@ -612,12 +621,13 @@ object Layer {
 
   def putPlainTextCut[S <: Sys[S]]()(implicit tx: S#Tx, ctx: Context[S], config: Config): Future[Unit] = {
     import ctx._
-    val startPos0     = (rnd.nextDouble() * matNumFrames).toLong
-    val cutLen0       = math.max(TimeRef.SampleRate, rnd.nextDouble() * matNumFrames).toLong
+    val startPos0     = math.min((matNumFrames - TimeRef.SampleRate).toLong, (rnd.nextDouble() * matNumFrames).toLong)
+    val maxNumFrames  = math.min(matNumFrames - startPos0, (config.maxSoundDur * TimeRef.SampleRate).toLong)
+    val cutLen        = math.max(TimeRef.SampleRate, (rnd.nextDouble() * maxNumFrames).toLong).toLong
     val breakPauses   = pauses.filter(_.break)
     val i             = breakPauses.indexWhere(_.span.start >= startPos0)
     val startPos      = if (i < 0) 0L else breakPauses(i).span.stop
-    val stopPos0      = startPos + cutLen0
+    val stopPos0      = startPos + cutLen
     val j             = breakPauses.indexWhere(_.span.start >= stopPos0, i + 1)
     val stopPos       = if (j < 0) matNumFrames - startPos else breakPauses(j).span.start
     val matSpan = Span(startPos, stopPos)
@@ -660,7 +670,7 @@ object Layer {
       val gainVal0      = (65.0 - loud95).dbAmp
       val gainVal       = rnd.nextDouble().linLin(0.0, 1.0, -18.0, 0.0).dbAmp * gainVal0
       val startPos      = startPos0
-      val stopPos       = startPos + cutLen0
+      val stopPos       = math.min(matNumFrames, startPos + cutLen0)
       val matSpan       = Span(startPos, stopPos)
       log(s"use random cut; matSpan = $matSpan / ${spanToTime(matSpan)}")
       val matDur        = matSpan.length / TimeRef.SampleRate
