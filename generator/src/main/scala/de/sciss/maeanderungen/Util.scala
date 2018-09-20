@@ -165,4 +165,15 @@ object Util {
       }
       fT
     }
+
+
+  def normalizeWeights[A](tup: Vec[(Double, A)]): Vec[(Double, A)] = {
+    val sum = tup.iterator.map(_._1).sum
+    require (sum > 0.0)
+    if (sum == 1.0) tup else tup.map {
+      case (w, c) => (w / sum) -> c
+    }
+  }
+
+  def alwaysTrue: Boolean = true
 }

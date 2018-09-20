@@ -284,11 +284,11 @@ object Layer {
   }
 
   def putTransformedSound[S <: Sys[S]]()(implicit tx: S#Tx, ctx: Context[S], config: Config): Future[Unit] = {
-    log("putTransformedSound")
     import ctx.{cursor, rnd}
-    val bleachInverse = 0.5.coin()
-    val futPch = SoundTransforms.mkBleach[S](inverse = bleachInverse)
-    flatMapTx[S, stm.Source[S#Tx, AudioCue.Obj[S]], Unit](futPch) { implicit tx => cueH =>
+    val t = SoundTransforms.choose()
+    log(s"putTransformedSound - $t")
+    val futT = t.make[S]()
+    flatMapTx[S, stm.Source[S#Tx, AudioCue.Obj[S]], Unit](futT) { implicit tx =>cueH =>
       val cue     = cueH()
       val partial = mkPartialContext(Category.HybridSound, cue)
       val ctxNew  = partial.copyTo(ctx)
@@ -357,7 +357,7 @@ object Layer {
     // - frequency filter (indeed that could be the "negative
     //   of the foreground")
 
-    if (ctx.intelligible) {
+    if (Util.alwaysTrue /* XXX TODO */ || ctx.intelligible) {
       putPlainTextFullIntel()
     } else {
       ??? // XXX TODO
@@ -478,7 +478,7 @@ object Layer {
 
         val futMask   = futBncFg.flatMap { fInFg =>
           flatMapTx[S, File, CueSource[S]](futBncBg) { implicit tx => fInBg =>
-            SoundTransforms.mkMask[S](fInFg = fInFg, offFg = offFg, fInBg = fInBg, offBg = offBg,
+            Mask.run[S](fInFg = fInFg, offFg = offFg, fInBg = fInBg, offBg = offBg,
               numFrames = numFrames, nameOut = nameOut)
           }
         }
@@ -628,7 +628,7 @@ object Layer {
   def putPlainTextCut[S <: Sys[S]]()(implicit tx: S#Tx, ctx: Context[S], config: Config): Future[Unit] = {
     import ctx._
     val startPos0     = math.min((matNumFrames - TimeRef.SampleRate).toLong, (rnd.nextDouble() * matNumFrames).toLong)
-    val maxNumFrames  = math.min(matNumFrames - startPos0, (config.maxSoundDur * TimeRef.SampleRate).toLong)
+    val maxNumFrames  = math.min(matNumFrames - startPos0, (config.maxTextDur * TimeRef.SampleRate).toLong)
     val cutLen        = math.max(TimeRef.SampleRate, (rnd.nextDouble() * maxNumFrames).toLong).toLong
     val breakPauses   = pauses.filter(_.break)
     val i             = breakPauses.indexWhere(_.span.start >= startPos0)
@@ -660,13 +660,15 @@ object Layer {
     log("putPlainSoundCut")
     import ctx._
     val startPos0     = (rnd.nextDouble() * matNumFrames).toLong
-    val cutLen0       = math.max(TimeRef.SampleRate, rnd.nextDouble() * matNumFrames).toLong
-    log(s"startPos0 = $startPos0 / ${framesToTime(startPos0)}, cutLen0 = $cutLen0 / ${framesToTime(cutLen0)}")
+    val maxNumFrames  = math.min(matNumFrames - startPos0, (config.maxSoundDur * TimeRef.SampleRate).toLong)
+    val cutLen        = math.max(TimeRef.SampleRate, (rnd.nextDouble() * maxNumFrames).toLong).toLong
+
+    log(s"startPos0 = $startPos0 / ${framesToTime(startPos0)}, cutLen0 = $cutLen / ${framesToTime(cutLen)}")
     val breakPauses   = pauses.filter(_.break)
     if (breakPauses.nonEmpty && 0.5.coin()) {
       val i             = breakPauses.indexWhere(_.span.start >= startPos0)
       val startPos      = if (i < 0) 0L else breakPauses(i).span.stop
-      val stopPos0      = startPos + cutLen0
+      val stopPos0      = startPos + cutLen
       val j             = breakPauses.indexWhere(_.span.start >= stopPos0, i + 1)
       val stopPos       = if (j < 0) matNumFrames - startPos else breakPauses(j).span.start
       val matSpan = Span(startPos, stopPos)
@@ -676,7 +678,7 @@ object Layer {
       val gainVal0      = (65.0 - loud95).dbAmp
       val gainVal       = rnd.nextDouble().linLin(0.0, 1.0, -18.0, 0.0).dbAmp * gainVal0
       val startPos      = startPos0
-      val stopPos       = math.min(matNumFrames, startPos + cutLen0)
+      val stopPos       = math.min(matNumFrames, startPos + cutLen)
       val matSpan       = Span(startPos, stopPos)
       log(s"use random cut; matSpan = $matSpan / ${spanToTime(matSpan)}")
       val matDur        = matSpan.length / TimeRef.SampleRate

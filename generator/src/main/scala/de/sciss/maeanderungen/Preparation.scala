@@ -29,7 +29,7 @@ import de.sciss.synth.proc.{AudioCue, Color, GenContext, TimeRef, Timeline, Work
 import de.sciss.synth.{io, proc}
 
 object Preparation {
-  val DEFAULT_VERSION = 12
+  val DEFAULT_VERSION = 13
 
   def process[S <: Sys[S]]()(implicit tx: S#Tx, workspace: Workspace[S]): Unit = {
     val r             = workspace.root
@@ -334,7 +334,7 @@ object Preparation {
 
         // ---- loudness percentiles ----
 
-        if (!ca.contains("loud-50") || !ca.contains("loud-95")) {
+        if (!ca.contains("loud-50") || !ca.contains("loud-80") || !ca.contains("loud-95")) {
           val vLoud = cueLoud.value
           val afLoud = io.AudioFile.openRead(vLoud.artifact)
           val (median, perc80, perc95) = try {
@@ -346,7 +346,11 @@ object Preparation {
             def percentile(n: Int) =
               sorted((sorted.length * n - 50) / 100).toDouble
 
-            (percentile(50), percentile(80), percentile(95))
+            if (sorted.nonEmpty) {
+              (percentile(50), percentile(80), percentile(95))
+            } else {
+              (28.0, 30.0, 32.0)
+            }
 
           } finally {
             afLoud.close()

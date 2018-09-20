@@ -13,12 +13,14 @@
 
 package de.sciss.maeanderungen
 
-import de.sciss.equal.Implicits._
 import de.sciss.file._
 import de.sciss.fscape.{GE, Graph, graph}
+import de.sciss.kollflitz.Vec
 import de.sciss.lucre.stm
+import de.sciss.lucre.stm.{Random, Source, TxnLike}
 import de.sciss.lucre.synth.Sys
 import de.sciss.maeanderungen.Layer.Context
+import de.sciss.maeanderungen.Ops._
 import de.sciss.numbers.Implicits._
 import de.sciss.synth.io.{AudioFile, AudioFileSpec}
 import de.sciss.synth.proc.AudioCue
@@ -26,160 +28,156 @@ import de.sciss.synth.proc.AudioCue
 import scala.concurrent.Future
 
 object SoundTransforms {
-  def mkMask[S <: Sys[S]](fInFg: File, offFg: Long, fInBg: File, offBg: Long, numFrames: Long, nameOut: String /* fOut: File */)
-                          (implicit tx: S#Tx, ctx: Context[S], config: Config): Future[stm.Source[S#Tx, AudioCue.Obj[S]]] = {
-    LayerUtil.mkRender(nameOut) { fOut =>
-      runMask[S](fInFg = fInFg, offFg = offFg, fInBg = fInBg, offBg = offBg, numFrames = numFrames, fOut = fOut)
+  val weighted: Vec[(Double, Transform)] = Util.normalizeWeights(Vec(
+    0.8 -> Transform.Bleach,
+    0.2 -> Transform.Fourier,
+    0.2 -> Transform.Filter,
+  ))
+
+  def choose[Tx <: TxnLike]()(implicit tx: Tx, r: Random[Tx]): Transform = {
+    import Ops._
+    weighted.chooseWeighted(_._1)._2
+  }
+
+  object Transform {
+    case object Bleach extends Transform {
+      def make[S <: Sys[S]]()(implicit tx: S#Tx, ctx: Context[S]): Future[Source[S#Tx, AudioCue.Obj[S]]] = {
+        import ctx.rnd
+        val inverse   = 0.5.coin()
+        val fltLen    = rangeRand(294, 661).toInt
+        mkBleach[S](inverse = inverse, fltLen = fltLen)
+      }
+    }
+
+    case object Fourier extends Transform {
+      def make[S <: Sys[S]]()(implicit tx: S#Tx, ctx: Context[S]): Future[Source[S#Tx, AudioCue.Obj[S]]] = {
+        import ctx.rnd
+        val inverse = 0.5.coin()
+        mkFourier[S](inverse = inverse)
+      }
+    }
+
+    case object Filter extends Transform {
+      def make[S <: Sys[S]]()(implicit tx: S#Tx, ctx: Context[S]): Future[Source[S#Tx, AudioCue.Obj[S]]] = {
+        import ctx.rnd
+        val isLow   = 0.5.coin()
+        val f1      = expRand(160, 16000)
+        val f2      = f1 * expRand(2.0/3.0, 3.0/2.0)
+        mkFilter[S](isLowPass = isLow, f1 = f1, f2 = f2)
+      }
+    }
+  }
+  sealed trait Transform {
+    def make[S <: Sys[S]]()(implicit tx: S#Tx, ctx: Context[S]): Future[stm.Source[S#Tx, AudioCue.Obj[S]]]
+  }
+
+  def mkBleach[S <: Sys[S]](inverse: Boolean, fltLen: Int)(implicit tx: S#Tx, ctx: Context[S]): Future[stm.Source[S#Tx, AudioCue.Obj[S]]] = {
+    import ctx._
+    val matVal    = material.value
+    val base      = matVal.artifact.base
+    val inverseS  = if (inverse) "I" else ""
+    val nameOut   = s"$base-Trns-Bleach$inverseS-$fltLen.aif"
+    LayerUtil.mkTransform(nameOut) { fOut =>
+      runBleach(fOut = fOut, inverse = inverse, fltLen = fltLen)
     }
   }
 
-  private def runMask[S <: Sys[S]](fInFg: File, offFg: Long, fInBg: File, offBg: Long, numFrames: Long, fOut: File)
-                          (implicit tx: S#Tx, config: Config): Future[Unit] = {
-
-    val specFg = AudioFile.readSpec(fInFg)
-    val specBg = AudioFile.readSpec(fInBg)
-
-    println(s"runMask: fInFg: ${fInFg.name}, fInBg: ${fInBg.name}, fg: $specFg, bg: $specBg, offFg $offFg, offBg $offBg, numFrames $numFrames")
-
-    assert(specFg.numFrames + offFg <= numFrames + 64) // + because of sample rate conversion round-off errors
-    assert(specBg.numFrames + offBg <= numFrames + 64) // + because of sample rate conversion round-off errors
-
-    val numFramesFg = math.min(specFg.numFrames, numFrames - offFg)
-    val numFramesBg = math.min(specBg.numFrames, numFrames - offBg)
+  private def runBleach[S <: Sys[S]](fOut: File, inverse: Boolean, fltLen: Int)
+                                    (implicit tx: S#Tx, ctx: Context[S]): Future[Unit] = {
+    val matVal  = ctx.material.value
+    val fIn     = matVal.artifact
+    val specIn  = AudioFile.readSpec(fIn)
+    import specIn.{numFrames, sampleRate}
 
     val g = Graph {
-      import de.sciss.fscape.graph._
-
-      def mkIn(f: File, off: Long, numFr: Long): GE = {
-        val in0   = AudioFileIn(f, numChannels = config.numChannels).take(numFr)
-        val in1   = if (off + numFr === numFrames) {
-          in0
-        } else {
-          val pad = numFrames - (off + numFr)
-          in0 ++ DC(0.0).take(pad)
-        }
-        val in2 = if (off === 0L) in1 else DC(0.0).take(off) ++ in1
-        in2 // .elastic()
-      }
-
-      def mkFgIn(): GE = mkIn(fInFg, offFg, numFramesFg)
-      val inFg = mkFgIn()
-
-      def mkBgIn(): GE = mkIn(fInBg, offBg, numFramesBg)
-
-      val inBg      = mkBgIn()
-      val fMin      = 50.0
-      val sr        = config.sampleRate.toDouble // 48000.0
-      val winSizeH  = ((sr / fMin) * 3).ceil.toInt / 2
-      val winSize   = winSizeH * 2
-      val stepSize  = winSize / 2
-      val fftSizeH  = winSize.nextPowerOfTwo
-      val fftSize   = fftSizeH * 2
-
-      val in1S      = Sliding(inFg, size = winSize, step = stepSize)
-      val in2S      = Sliding(inBg, size = winSize, step = stepSize)
-      val in1W      = in1S * GenWindow(winSize, shape = GenWindow.Hann)
-      val in2W      = in2S * GenWindow(winSize, shape = GenWindow.Hann)
-
-      val in1F      = Real1FFT(in1W, size = winSize, padding = fftSize - winSize)
-      val in2F      = Real1FFT(in2W, size = winSize, padding = fftSize - winSize)
-
-      val in1Mag    = in1F.complex.mag
-      val in2Mag    = in2F.complex.mag
-
-      val blurTime  = ((2.0 * sr) / stepSize) .ceil.toInt
-      val blurFreq  = (200.0 / (sr / fftSize)).ceil.toInt
-      val columns   = blurTime * 2 + 1
-      def post      = DC(0.0).take(blurTime * fftSizeH)
-      val in1Pad    = in1Mag ++ post
-      val in2Pad    = in2Mag ++ post
-
-      // println(s"blurTime $blurTime, blurFreq $blurFreq, winSize $winSize, stepSize $stepSize, fftSize $fftSize")
-
-      val mask      = Masking(fg = in1Pad, bg = in2Pad, rows = fftSizeH, columns = columns,
-        threshNoise = -56.0.dbAmp /* 0.5e-3 */, threshMask = -6.0.dbAmp /* 0.5 */, blurRows = blurFreq, blurColumns = blurTime)
-
-      //    Plot1D(mask.drop(fftSizeH * 16).ampDb, size = fftSizeH)
-
-      // RunningMax(mask < 1.0).last.poll(0, "has-filter?")
-
-      val maskC     = mask zip DC(0.0)
-      val fltSym    = (Real1IFFT(maskC, size = fftSize) / fftSizeH).drop(blurTime * fftSize)
-
-      //    Plot1D(flt.drop(fftSize * 16), size = fftSize)
-
-      val fftSizeCep  = fftSize * 2
-      val fltSymR     = {
-        val r   = RotateWindow(fltSym, fftSize, fftSizeH)
-        val rr  = ResizeWindow(r  , fftSize, stop = fftSize)
-        val rrr = RotateWindow(rr, fftSizeCep, -fftSizeH)
-        rrr
-      }
-      //    val fltF        = Real1FullFFT(in = fltSymR, size = fftSize, padding = fftSize)
-      val fltF        = Real1FullFFT(in = fltSymR, size = fftSizeCep, padding = 0)
-      val fltFLogC    = fltF.complex.log.max(-320) // (-80)
-
-      val cep         = Complex1IFFT(in = fltFLogC, size = fftSizeCep) / fftSize
-      val cepOut      = FoldCepstrum(in = cep, size = fftSizeCep,
-        crr = +1, cri = +1, clr = 0, cli = 0,
-        ccr = +1, cci = -1, car = 0, cai = 0)
-
-      val fltMinF     = Complex1FFT(in = cepOut, size = fftSizeCep) * fftSize
-      val fltMinFExpC = fltMinF.complex.exp
-      val fltMin0     = Real1FullIFFT (in = fltMinFExpC, size = fftSizeCep)
-      val fltMin      = ResizeWindow(fltMin0, fftSizeCep, stop = -fftSize)
-
-      // val writtenMin = AudioFileOut(fltMin, fOutMin, AudioFileSpec(numChannels = 1, sampleRate = sr))
-      // writtenMin.poll(sr * 10, "frames-min")
-
-      val bg        = mkBgIn() // .take(numFrames)
-      val bgS       = Sliding(bg, size = winSize, step = stepSize)
-      val bgW       = bgS * GenWindow(winSize, shape = GenWindow.Hann)
-      val convSize  = (winSize + fftSize - 1).nextPowerOfTwo
-      val bgF       = Real1FFT(bgW /* RotateWindow(bgW, winSize, -winSizeH) */, winSize, convSize - winSize)
-      val fltMinFF  = Real1FFT(fltMin, fftSize, convSize - fftSize)
-      val convF     = bgF.complex * fltMinFF
-      val conv      = Real1IFFT(convF, convSize) * convSize
-      val convLap   = OverlapAdd(conv, convSize, stepSize).take(numFrames)
-      val sigOut    = convLap * 0.5 // XXX TODO --- where does this gain factor come from?
-
-      val writtenFlt = AudioFileOut(sigOut, fOut, AudioFileSpec(numChannels = config.numChannels, sampleRate = sr))
-      // writtenFlt.poll(sr * 10, "frames-flt")
-      val prog  = writtenFlt / numFrames
-      val progT = Metro(specFg.sampleRate)
-//      prog.poll(progT, "prog")
+      import graph._
+      def mkIn()      = AudioFileIn(file = fIn, numChannels = 1)
+      val in          = mkIn()
+      val feedback    = -50.0.dbAmp
+      val clip        =  18.0.dbAmp
+      val sig0        = Bleach(in, filterLen = fltLen, feedback = feedback, filterClip = clip)
+      val sig1        = if (!inverse) sig0 else in.elastic() - sig0
+      val sigOut      = normalize(sig1)
+      val writtenFlt  = AudioFileOut(sigOut, fOut, AudioFileSpec(numChannels = 1, sampleRate = sampleRate))
+      val prog        = writtenFlt / numFrames
+      val progT       = Metro(sampleRate)
       Progress(prog, progT)
     }
 
     LayerUtil.renderFsc[S](g)
   }
 
-  def mkBleach[S <: Sys[S]](inverse: Boolean)(implicit tx: S#Tx, ctx: Context[S]): Future[stm.Source[S#Tx, AudioCue.Obj[S]]] = {
+  def mkFourier[S <: Sys[S]](inverse: Boolean)(implicit tx: S#Tx, ctx: Context[S]): Future[stm.Source[S#Tx, AudioCue.Obj[S]]] = {
     import ctx._
     val matVal    = material.value
     val base      = matVal.artifact.base
     val inverseS  = if (inverse) "I" else ""
-    val nameOut   = s"$base-Trns-Bleach$inverseS.aif"
+    val nameOut   = s"$base-Trns-Fourier${inverseS}.aif"
     LayerUtil.mkTransform(nameOut) { fOut =>
-      runBleach(fOut = fOut, inverse = inverse)
+      runFourier(fOut = fOut, inverse = inverse)
     }
   }
 
-  private def runBleach[S <: Sys[S]](fOut: File, inverse: Boolean)(implicit tx: S#Tx, ctx: Context[S]): Future[Unit] = {
+  private def runFourier[S <: Sys[S]](fOut: File, inverse: Boolean)
+                                     (implicit tx: S#Tx, ctx: Context[S]): Future[Unit] = {
     val matVal  = ctx.material.value
     val fIn     = matVal.artifact
     val specIn  = AudioFile.readSpec(fIn)
-    import specIn.{sampleRate, numFrames}
+    import specIn.{numFrames, sampleRate}
 
     val g = Graph {
       import graph._
       def mkIn()      = AudioFileIn(file = fIn, numChannels = 1)
       val in          = mkIn()
-      val fltLen      = 441
-      val feedback    = -50.0.dbAmp
-      val clip        =  18.0.dbAmp
-      val sig0        = Bleach(in, filterLen = fltLen, feedback = feedback, filterClip = clip)
-      val sigOut      = if (!inverse) sig0 else in.elastic() - sig0
+      val co          = in zip DC(0.0)
+      val f           = Fourier(in = co, size = numFrames << 1, dir = if (inverse) -1 else 1, mem = 524288)
+      val sig1        = f.take(numFrames)
+      val sigOut      = normalize(sig1)
+      val writtenFlt  = AudioFileOut(sigOut, fOut, AudioFileSpec(numChannels = 1, sampleRate = sampleRate))
+      val prog        = writtenFlt / numFrames
+      val progT       = Metro(sampleRate)
+      Progress(prog, progT)
+    }
+
+    LayerUtil.renderFsc[S](g)
+  }
+
+  def mkFilter[S <: Sys[S]](isLowPass: Boolean, f1: Double, f2: Double)
+                           (implicit tx: S#Tx, ctx: Context[S]): Future[stm.Source[S#Tx, AudioCue.Obj[S]]] = {
+    import ctx._
+    val matVal    = material.value
+    val base      = matVal.artifact.base
+    val filterS   = if (isLowPass) "LPF" else "HPF"
+    val nameOut   = s"$base-Trns-$filterS-${f1.toInt}-${f2.toInt}.aif"
+    LayerUtil.mkTransform(nameOut) { fOut =>
+      runFilter(fOut = fOut, isLowPass = isLowPass, f1 = f1, f2 = f2)
+    }
+  }
+
+  private def normalize(in: GE): GE = {
+    import graph._
+    val b     = BufferDisk(in)
+    val max   = RunningMax(in.abs).last.max(-320.dbAmp)
+    val gain  = max.reciprocal
+    b * gain
+  }
+
+  private def runFilter[S <: Sys[S]](fOut: File, isLowPass: Boolean, f1: Double, f2: Double)
+                                     (implicit tx: S#Tx, ctx: Context[S]): Future[Unit] = {
+    val matVal  = ctx.material.value
+    val fIn     = matVal.artifact
+    val specIn  = AudioFile.readSpec(fIn)
+    import specIn.{numFrames, sampleRate}
+
+    val g = Graph {
+      import graph._
+      def mkIn()      = AudioFileIn(file = fIn, numChannels = 1)
+      val in          = mkIn()
+      val freqHz      = Line(f1, f2, numFrames)
+      val freqN       = freqHz / sampleRate
+      val f           = if (isLowPass) LPF(in, freqN) else HPF(in, freqN)
+      val sig1        = f // .take(numFrames)
+      val sigOut      = normalize(sig1)
       val writtenFlt  = AudioFileOut(sigOut, fOut, AudioFileSpec(numChannels = 1, sampleRate = sampleRate))
       val prog        = writtenFlt / numFrames
       val progT       = Metro(sampleRate)

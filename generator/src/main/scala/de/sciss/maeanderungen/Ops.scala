@@ -61,4 +61,19 @@ object Ops {
       }
     }
   }
+
+  def rangeRand[Tx <: TxnLike](lo: Double, hi: Double)(implicit tx: Tx, r: Random[Tx]): Double = {
+    val lo1     = math.min(lo, hi)
+    val hi1     = math.max(lo, hi)
+    val span    = hi1 - lo1
+    r.nextDouble() * span + lo
+  }
+
+  def expRand[Tx <: TxnLike](lo: Double, hi: Double)(implicit tx: Tx, r: Random[Tx]): Double = {
+    val lo1     = math.min(lo, hi)
+    val hi1     = math.max(lo, hi)
+    val ratio0  = hi1 / lo1
+    val ratio   = if (ratio0 > 0) ratio0 else 1
+    lo * math.exp(math.log(ratio) * r.nextDouble())
+  }
 }

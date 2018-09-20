@@ -25,8 +25,6 @@ import de.sciss.synth.proc.AudioCue
 import scala.concurrent.Future
 
 object TextTransforms {
-  final val DEFAULT_VERSION = 1
-
   def mkRemovePitch[S <: Sys[S]]()(implicit tx: S#Tx, ctx: Context[S]): Future[stm.Source[S#Tx, AudioCue.Obj[S]]] = {
     import ctx._
     val matVal    = material.value

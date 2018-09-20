@@ -15,8 +15,29 @@ package de.sciss.maeanderungen
 
 import de.sciss.kollflitz.Vec
 import de.sciss.lucre.stm.{Random, TxnLike}
+import de.sciss.maeanderungen.Util.normalizeWeights
 
 object Category {
+  val weightedText: Vec[(Double, Text)] = normalizeWeights(Vec(
+    0.2 -> GettingLost,
+    0.1 -> CountingTrees,
+    0.1 -> SkyObservations,
+    0.1 -> ChaoticEnumerations,
+    0.1 -> Acrostics,
+    0.1 -> PoeticManuals,
+    0.3 -> MetaText
+  ))
+
+  val weightedSound: Vec[(Double, Sound)] = normalizeWeights(Vec(
+    1.0 -> HybridSound,
+    1.0 -> FieldRecording,
+    1.0 -> InductionCoil,
+    1.0 -> Piezo,
+    1.0 -> GeigerCounter
+  ))
+
+  // ----------------------------------------------------------------
+
   sealed trait Text extends Category {
     final val isText = true
 
@@ -145,32 +166,6 @@ object Category {
   val all: Vec[Category] = text ++ sound
 
   val abbrevMap: Map[String, Category] = all.iterator.map { c => c.abbrev -> c } .toMap
-
-  private def normalizeWeights[A](tup: Vec[(Double, A)]): Vec[(Double, A)] = {
-    val sum = tup.iterator.map(_._1).sum
-    require (sum > 0.0)
-    if (sum == 1.0) tup else tup.map {
-      case (w, c) => (w / sum) -> c
-    }
-  }
-
-  val weightedText: Vec[(Double, Text)] = normalizeWeights(Vec(
-    0.2 -> GettingLost,
-    0.1 -> CountingTrees,
-    0.1 -> SkyObservations,
-    0.1 -> ChaoticEnumerations,
-    0.1 -> Acrostics,
-    0.1 -> PoeticManuals,
-    0.3 -> MetaText
-  ))
-
-  val weightedSound: Vec[(Double, Sound)] = normalizeWeights(Vec(
-    1.0 -> HybridSound,
-    1.0 -> FieldRecording,
-    1.0 -> InductionCoil,
-    1.0 -> Piezo,
-    1.0 -> GeigerCounter
-  ))
 
 //  val weighted: Vec[(Double, Category)] = normalizeWeights(weightedText ++ weightedSound)
 

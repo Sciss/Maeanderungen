@@ -106,6 +106,11 @@ object Generator {
         .validate { v => if (v >= 1.0) success else failure("Must >= 1") }
         .action { (v, c) => c.copy(maxSoundDur = v) }
 
+      opt[Double]("max-text-dur")
+        .text(s"Maximum text (when cut) duration in seconds (default: ${default.maxTextDur})")
+        .validate { v => if (v >= 1.0) success else failure("Must >= 1") }
+        .action { (v, c) => c.copy(maxTextDur = v) }
+
       opt[Unit]("backup")
         .text("Backup workspace before modification")
         .action { (_, c) => c.copy(backupWorkspace = true) }
@@ -119,7 +124,8 @@ object Generator {
       val fZip = Util.mkUnique(config.ws.replaceExt("zip"))
       println(s"Making backup to ${fZip.name}")
       import sys.process._
-      val res = Seq("zip", "-r", "-q", fZip.path, config.ws.path).!
+      val p = Process(command = Seq("zip", "-r", "-q", fZip.path, config.ws.name), cwd = Some(config.ws.parent))
+      val res = p.! // Seq("zip", "-r", "-q", fZip.path, config.ws.path).!
       require (res == 0, s"Failed to zip (return code $res)")
     }
     val store = BerkeleyDB.factory(config.ws, createIfNecessary = false)
