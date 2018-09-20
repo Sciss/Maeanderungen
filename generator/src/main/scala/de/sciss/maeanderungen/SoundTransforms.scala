@@ -67,9 +67,6 @@ object SoundTransforms {
       }
     }
   }
-  sealed trait Transform {
-    def make[S <: Sys[S]]()(implicit tx: S#Tx, ctx: Context[S]): Future[stm.Source[S#Tx, AudioCue.Obj[S]]]
-  }
 
   def mkBleach[S <: Sys[S]](inverse: Boolean, fltLen: Int)(implicit tx: S#Tx, ctx: Context[S]): Future[stm.Source[S#Tx, AudioCue.Obj[S]]] = {
     import ctx._
@@ -91,17 +88,17 @@ object SoundTransforms {
 
     val g = Graph {
       import graph._
-      def mkIn()      = AudioFileIn(file = fIn, numChannels = 1)
+      def mkIn()      = AudioFileIn(file = fIn, numChannels = specIn.numChannels)
       val in          = mkIn()
       val feedback    = -50.0.dbAmp
       val clip        =  18.0.dbAmp
       val sig0        = Bleach(in, filterLen = fltLen, feedback = feedback, filterClip = clip)
       val sig1        = if (!inverse) sig0 else in.elastic() - sig0
-      val sigOut      = normalize(sig1)
-      val writtenFlt  = AudioFileOut(sigOut, fOut, AudioFileSpec(numChannels = 1, sampleRate = sampleRate))
+      val sigOut      = normalize(sig1, numFrames)
+      val writtenFlt  = AudioFileOut(sigOut, fOut, AudioFileSpec(numChannels = specIn.numChannels, sampleRate = sampleRate))
       val prog        = writtenFlt / numFrames
       val progT       = Metro(sampleRate)
-      Progress(prog, progT)
+      Progress(prog, progT, "write")
     }
 
     LayerUtil.renderFsc[S](g)
@@ -127,16 +124,16 @@ object SoundTransforms {
 
     val g = Graph {
       import graph._
-      def mkIn()      = AudioFileIn(file = fIn, numChannels = 1)
+      def mkIn()      = AudioFileIn(file = fIn, numChannels = specIn.numChannels)
       val in          = mkIn()
       val co          = in zip DC(0.0)
       val f           = Fourier(in = co, size = numFrames << 1, dir = if (inverse) -1 else 1, mem = 524288)
       val sig1        = f.take(numFrames)
-      val sigOut      = normalize(sig1)
-      val writtenFlt  = AudioFileOut(sigOut, fOut, AudioFileSpec(numChannels = 1, sampleRate = sampleRate))
+      val sigOut      = normalize(sig1, numFrames)
+      val writtenFlt  = AudioFileOut(sigOut, fOut, AudioFileSpec(numChannels = specIn.numChannels, sampleRate = sampleRate))
       val prog        = writtenFlt / numFrames
       val progT       = Metro(sampleRate)
-      Progress(prog, progT)
+      Progress(prog, progT, "write")
     }
 
     LayerUtil.renderFsc[S](g)
@@ -154,9 +151,10 @@ object SoundTransforms {
     }
   }
 
-  private def normalize(in: GE): GE = {
+  private def normalize(in: GE, numFrames: Long): GE = {
     import graph._
     val b     = BufferDisk(in)
+    Progress(Frames(in) / numFrames, Metro(48000), "render")
     val max   = RunningMax(in.abs).last.max(-320.dbAmp)
     val gain  = max.reciprocal
     b * gain
@@ -171,17 +169,17 @@ object SoundTransforms {
 
     val g = Graph {
       import graph._
-      def mkIn()      = AudioFileIn(file = fIn, numChannels = 1)
+      def mkIn()      = AudioFileIn(file = fIn, numChannels = specIn.numChannels)
       val in          = mkIn()
       val freqHz      = Line(f1, f2, numFrames)
       val freqN       = freqHz / sampleRate
       val f           = if (isLowPass) LPF(in, freqN) else HPF(in, freqN)
       val sig1        = f // .take(numFrames)
-      val sigOut      = normalize(sig1)
-      val writtenFlt  = AudioFileOut(sigOut, fOut, AudioFileSpec(numChannels = 1, sampleRate = sampleRate))
+      val sigOut      = normalize(sig1, numFrames = numFrames)
+      val writtenFlt  = AudioFileOut(sigOut, fOut, AudioFileSpec(numChannels = specIn.numChannels, sampleRate = sampleRate))
       val prog        = writtenFlt / numFrames
       val progT       = Metro(sampleRate)
-      Progress(prog, progT)
+      Progress(prog, progT, "write")
     }
 
     LayerUtil.renderFsc[S](g)

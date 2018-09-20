@@ -326,7 +326,7 @@ object Layer {
     if (complete || !(rnd.nextDouble() < config.probShorten) ) {
       putPlainTextFull()
     } else {  // shortened
-      if (rnd.nextDouble() < config.probShortenFade) {
+      if (!Util.alwaysTrue /* XXX TODO */ && rnd.nextDouble() < config.probShortenFade) {
         putPlainTextFaded()
       } else {
         putPlainTextCut()
@@ -595,7 +595,11 @@ object Layer {
       }
     }
 
-    val pos0TLOpt = findLeft(reg0, pos0TLTry) orElse findRight(reg0, pos0TLTry)
+    val pos0TLOpt = if (0.5.coin()) {
+      findLeft(reg0, pos0TLTry) orElse findRight(reg0, pos0TLTry)
+    } else {
+      findRight(reg0, pos0TLTry) orElse findLeft(reg0, pos0TLTry)
+    }
     if (pos0TLOpt.isEmpty) return None
 
     val placement = List.newBuilder[PlacedRegion]
