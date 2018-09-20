@@ -419,7 +419,7 @@ object Layer {
     val numFramesTL = (cueVal.numFrames * TimeRef.SampleRate / cueVal.sampleRate).toLong
     val spanTL = Span(offCue, offCue + numFramesTL)
     val (_, pBg) = mkAudioRegion[S](tl = ctx.tl, time = spanTL, audioCue = cueBg, pMain = ctx.pMain,
-      gOffset = 0L, gain = 1.0)
+      gOffset = 0L, gain = 0.5 /* 1.0 */) // XXX TODO where does the gain factor come from?
     replace.map.headOption.foreach {
       case (e, _) =>
         val pOld = e.value

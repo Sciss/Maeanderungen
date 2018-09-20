@@ -138,7 +138,7 @@ object SoundTransforms {
       val convF     = bgF.complex * fltMinFF
       val conv      = Real1IFFT(convF, convSize) * convSize
       val convLap   = OverlapAdd(conv, convSize, stepSize).take(numFrames)
-      val sigOut    = convLap // .elastic()
+      val sigOut    = convLap * 0.5 // XXX TODO --- where does this gain factor come from?
 
       val writtenFlt = AudioFileOut(sigOut, fOut, AudioFileSpec(numChannels = config.numChannels, sampleRate = sr))
       // writtenFlt.poll(sr * 10, "frames-flt")
