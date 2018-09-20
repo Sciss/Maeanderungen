@@ -100,6 +100,12 @@ object Generator {
       opt[Unit]("keep-temp-files")
         .text("Do not delete temp files")
         .action { (_, c) => c.copy(deleteTempFiles = false) }
+
+      opt[Double]("max-sound-dur")
+        .text(s"Maximum sound (field recordings etc.) duration in seconds (default: ${default.maxSoundDur})")
+        .validate { v => if (v >= 1.0) success else failure("Must >= 1") }
+        .action { (v, c) => c.copy(maxSoundDur = v) }
+
     }
     p.parse(args, default).fold(sys.exit(1)) { implicit config => run() }
   }

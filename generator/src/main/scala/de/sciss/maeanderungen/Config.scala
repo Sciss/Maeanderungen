@@ -32,4 +32,5 @@ case class Config(ws                : File    = file("material.mllt"),
                   maxPan            : Double  = 0.5,
                   textSoundRatio    : Double  = 1.0,
                   deleteTempFiles   : Boolean = true,
+                  maxSoundDur       : Double  = 60.0 * 3,
                  )

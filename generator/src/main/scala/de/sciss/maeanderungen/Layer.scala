@@ -268,6 +268,7 @@ object Layer {
       val cue     = cueH()
       val partial = mkPartialContext(Category.HybridSound, cue)
       val ctxNew  = partial.copyTo(ctx)
+      // XXX TODO: does not need to be full
       putPlainSoundFull()(tx, ctxNew, config)
     }
   }
@@ -280,6 +281,7 @@ object Layer {
       val cue     = cueH()
       val partial = mkPartialContext(Category.HybridSound, cue)
       val ctxNew  = partial.copyTo(ctx)
+      // XXX TODO: does not need to be full
       putPlainSoundFull()(tx, ctxNew, config)
     }
   }
@@ -343,7 +345,7 @@ object Layer {
     if (ctx.intelligible) {
       putPlainTextFullIntel()
     } else {
-      ???
+      ??? // XXX TODO
     }
   }
 
@@ -605,7 +607,7 @@ object Layer {
   }
 
   def putPlainTextFaded[S <: Sys[S]]()(implicit tx: S#Tx, ctx: Context[S], config: Config): Future[Unit] = {
-    ???
+    ???   // XXX TODO
   }
 
   def putPlainTextCut[S <: Sys[S]]()(implicit tx: S#Tx, ctx: Context[S], config: Config): Future[Unit] = {
