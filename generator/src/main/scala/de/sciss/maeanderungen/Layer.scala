@@ -46,6 +46,7 @@ object Layer {
   final val attrPauses  = "pauses"
   final val attrBreak   = "break"
   final val attrIntel   = "TV"
+  final val attrLoud80  = "loud-80"
   final val attrLoud95  = "loud-95"
 
   final case class Pause(span: Span, break: Boolean)
@@ -66,6 +67,7 @@ object Layer {
   final case class PartialContext[S <: Sys[S]](
                                                 material      : AudioCue.Obj[S],
                                                 matNumFrames  : Long,
+                                                loud80        : Double,
                                                 loud95        : Double,
                                                 pauses        : Vec[Pause],
                                                 intelligible  : Boolean,
@@ -93,6 +95,7 @@ object Layer {
                                     category      : Category,
                                     material      : AudioCue.Obj[S],
                                     matNumFrames  : Long,
+                                    loud80        : Double,
                                     loud95        : Double,
                                     pauses        : Vec[Pause],
                                     intelligible  : Boolean,
@@ -133,11 +136,13 @@ object Layer {
 
     val matV          = mat.value
     val matNumFrames  = (matV.numFrames.toDouble / matV.sampleRate * TimeRef.SampleRate).toLong
+    val loud80        = mat.attr.![DoubleObj](attrLoud80).value
     val loud95        = mat.attr.![DoubleObj](attrLoud95).value
 
     PartialContext(
       material      = mat,
       matNumFrames  = matNumFrames,
+      loud80        = loud80,
       loud95        = loud95,
       pauses        = pauses,
       intelligible  = intelligible,
@@ -228,6 +233,7 @@ object Layer {
       tlNumFrames   = numFrames,
       category      = c,
       material      = partial.material,
+      loud80        = partial.loud80,
       loud95        = partial.loud95,
       matNumFrames  = partial.matNumFrames,
       pauses        = partial.pauses,
@@ -468,7 +474,7 @@ object Layer {
         log(s"spanFg = $spanFg (${spanToTime(spanFg)}), spanBg = $spanBg (${spanToTime(spanBg)}), numFrames = $numFrames / ${framesToTime(union.length)}")
         val dirOut    = config.baseDir / "audio_work" / "rendered"
         dirOut.mkdirs()
-        val nameOut   = s"$nameFg-mask-$nameBg.aif"
+        val nameOut   = s"${Util.shorten(s"$nameFg-mask-$nameBg")}.aif"
 
         val futMask   = futBncFg.flatMap { fInFg =>
           flatMapTx[S, File, CueSource[S]](futBncBg) { implicit tx => fInBg =>
@@ -693,7 +699,8 @@ object Layer {
     import ctx._
     val placementOpt  = tryPlacePlainIntel[S](matSpan = matSpan)
     log(s"placementOpt = $placementOpt")
-    val gainVal       = (65.0 - loud95).dbAmp // XXX TODO --- we should probably take loud50 into account as well
+//    val gainVal       = (65.0 - loud95).dbAmp // XXX TODO --- we should probably take loud50 into account as well
+    val gainVal       = (65.0 - loud80).dbAmp
     placementOpt.fold(Future.successful(())) { placement =>
       executePlacementAndMask(placement, gain = gainVal)
     }

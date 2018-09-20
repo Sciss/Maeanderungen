@@ -41,28 +41,31 @@ object SoundTransforms {
 
     println(s"runMask: fInFg: ${fInFg.name}, fInBg: ${fInBg.name}, fg: $specFg, bg: $specBg, offFg $offFg, offBg $offBg, numFrames $numFrames")
 
-    assert(specFg.numFrames + offFg <= numFrames + 2) // + 2 because of sample rate conversion round-off errors
-    assert(specBg.numFrames + offBg <= numFrames + 2) // + 2 because of sample rate conversion round-off errors
+    assert(specFg.numFrames + offFg <= numFrames + 64) // + because of sample rate conversion round-off errors
+    assert(specBg.numFrames + offBg <= numFrames + 64) // + because of sample rate conversion round-off errors
+
+    val numFramesFg = math.min(specFg.numFrames, numFrames - offFg)
+    val numFramesBg = math.min(specBg.numFrames, numFrames - offBg)
 
     val g = Graph {
       import de.sciss.fscape.graph._
 
-      def mkIn(f: File, spec: AudioFileSpec, off: Long): GE = {
-        val in0   = AudioFileIn(f, numChannels = config.numChannels)
-        val in1   = if (off + spec.numFrames === numFrames) {
+      def mkIn(f: File, off: Long, numFr: Long): GE = {
+        val in0   = AudioFileIn(f, numChannels = config.numChannels).take(numFr)
+        val in1   = if (off + numFr === numFrames) {
           in0
         } else {
-          val pad = numFrames - (off + spec.numFrames)
+          val pad = numFrames - (off + numFr)
           in0 ++ DC(0.0).take(pad)
         }
         val in2 = if (off === 0L) in1 else DC(0.0).take(off) ++ in1
         in2 // .elastic()
       }
 
-      def mkFgIn(): GE = mkIn(fInFg, specFg, offFg)
+      def mkFgIn(): GE = mkIn(fInFg, offFg, numFramesFg)
       val inFg = mkFgIn()
 
-      def mkBgIn(): GE = mkIn(fInBg, specBg, offBg)
+      def mkBgIn(): GE = mkIn(fInBg, offBg, numFramesBg)
 
       val inBg      = mkBgIn()
       val fMin      = 50.0

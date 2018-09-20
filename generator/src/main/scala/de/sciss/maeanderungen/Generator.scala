@@ -13,7 +13,7 @@
 
 package de.sciss.maeanderungen
 
-import de.sciss.file.File
+import de.sciss.file._
 import de.sciss.lucre.stm.store.BerkeleyDB
 import de.sciss.mellite.Mellite
 import de.sciss.synth.proc.{Durable, Workspace}
@@ -106,12 +106,22 @@ object Generator {
         .validate { v => if (v >= 1.0) success else failure("Must >= 1") }
         .action { (v, c) => c.copy(maxSoundDur = v) }
 
+      opt[Unit]("backup")
+        .text("Backup workspace before modification")
+        .action { (_, c) => c.copy(backupWorkspace = true) }
     }
     p.parse(args, default).fold(sys.exit(1)) { implicit config => run() }
   }
 
   def run()(implicit config: Config): Unit = {
     Mellite.initTypes()
+    if (config.backupWorkspace && config.ws.exists()) {
+      val fZip = Util.mkUnique(config.ws.replaceExt("zip"))
+      println(s"Making backup to ${fZip.name}")
+      import sys.process._
+      val res = Seq("zip", "-r", "-q", fZip.path, config.ws.path).!
+      require (res == 0, s"Failed to zip (return code $res)")
+    }
     val store = BerkeleyDB.factory(config.ws, createIfNecessary = false)
     Workspace.read(config.ws, store) match {
       case d: Workspace.Durable =>

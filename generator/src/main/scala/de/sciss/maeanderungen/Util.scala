@@ -135,6 +135,24 @@ object Util {
     if (common > 0) n1.substring(0, common) else "name"
   }
 
+  def shorten(s: String): String = {
+    var res = s
+    while (res.length > 80) {
+      val i = res.lastIndexWhere(c => "aeiouAEIOU".contains(c))
+      if (i >= 0) {
+        res = res.substring(0, i) ++ res.substring(i + 1)
+      } else {
+        val j = res.lastIndexWhere(c => (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z'))
+        if (j >= 0) {
+          res = res.substring(0, j) ++ res.substring(j + 1)
+        } else {
+          res = res.substring(0, res.length - 1)
+        }
+      }
+    }
+    res
+  }
+
   def mkUnique(f: File): File =
     if (!f.exists()) f else {
       var count   = 0
