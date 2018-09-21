@@ -90,7 +90,7 @@ object LayerUtil {
                                  fadeIn   : FadeSpec  = FadeSpec(0L),
                                  fadeOut  : FadeSpec  = FadeSpec(0L),
                                  gain     : Double    = 1.0)
-                                (implicit tx: S#Tx, ctx: Context[S] /*, config: Config */): (SpanLikeObj[S], Proc[S]) = {
+                                (implicit tx: S#Tx, ctx: Context[S], config: Config): (SpanLikeObj[S], Proc[S]) = {
     val spanV   = time
     val span    = SpanLikeObj.newVar[S](spanV)
     val p       = Proc[S]
@@ -108,8 +108,8 @@ object LayerUtil {
     val prAttr = p.attr
     prAttr.put(Proc.graphAudio, audioCueOff)
     val numInChans = audioCue.numChannels
-    require (numInChans == 1 || numInChans == 2)
-    val pTape = if (numInChans == 1) ctx.pTape1 else ctx.pTape2
+    require (numInChans == 1 || numInChans == 2 || numInChans == config.numChannels)
+    val pTape = if (numInChans == 1) ctx.pTape1 else if (numInChans == 2) ctx.pTape2 else ctx.pTapeAll
     val sourceOpt = pTape.attr.get(Proc.attrSource)
     sourceOpt.foreach(source => p.attr.put(Proc.attrSource, source))
     p.graph() = pTape.graph()

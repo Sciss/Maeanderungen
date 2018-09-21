@@ -13,6 +13,7 @@
 
 package de.sciss.maeanderungen
 
+import de.sciss.equal.Implicits._
 import de.sciss.file._
 import de.sciss.lucre.stm.store.BerkeleyDB
 import de.sciss.mellite.Mellite
@@ -20,6 +21,7 @@ import de.sciss.synth.proc.{Durable, Workspace}
 
 import scala.concurrent.duration.Duration
 import scala.concurrent.{Await, Future}
+import scala.util.control.NonFatal
 
 object Generator {
   def main(args: Array[String]): Unit = {
@@ -92,7 +94,7 @@ object Generator {
         .validate { v => if (v >= 0 && v <= 1) success else failure("Must be 0 to 1") }
         .action { (v, c) => c.copy(maxPan = v) }
 
-      opt[Double]("text-sound-ratio")
+      opt[Double]('t', "text-sound-ratio")
         .text(s"Probability ratio text to sound (1 = equal) (default: ${default.textSoundRatio})")
         .validate { v => if (v >= 0) success else failure("Must be >= 0") }
         .action { (v, c) => c.copy(textSoundRatio = v) }
@@ -115,48 +117,62 @@ object Generator {
         .text("Backup workspace before modification")
         .action { (_, c) => c.copy(backupWorkspace = true) }
 
-      opt[Unit]("force-seed")
+      opt[Unit]('f', "force-seed")
         .text("Force re-seeding of RNG")
         .action { (_, c) => c.copy(forceSeed = true) }
+
+      opt[Int]('i', "iterations")
+        .text(s"Number of iterations to run (default: ${default.iterations})")
+        .validate { v => if (v >= 1) success else failure("Must be >= 1") }
+        .action { (v, c) => c.copy(iterations = v) }
+
     }
     p.parse(args, default).fold(sys.exit(1)) { implicit config => run() }
   }
 
   def run()(implicit config: Config): Unit = {
     Mellite.initTypes()
-    if (config.backupWorkspace && config.ws.exists()) {
-      val fZip = Util.mkUnique(config.ws.replaceExt("zip"))
-      println(s"Making backup to ${fZip.name}")
-      import sys.process._
-      val p = Process(command = Seq("zip", "-r", "-q", fZip.path, config.ws.name), cwd = Some(config.ws.parent))
-      val res = p.! // Seq("zip", "-r", "-q", fZip.path, config.ws.path).!
-      require (res == 0, s"Failed to zip (return code $res)")
+
+    for (it <- 1 to config.iterations) {
+      if (config.backupWorkspace && config.ws.exists()) {
+        val fZip = Util.mkUnique(config.ws.replaceExt("zip"))
+        println(s"Making backup to ${fZip.name}")
+        import sys.process._
+        val p = Process(command = Seq("zip", "-r", "-q", fZip.path, config.ws.name), cwd = Some(config.ws.parent))
+        val res = p.! // Seq("zip", "-r", "-q", fZip.path, config.ws.path).!
+        require (res == 0, s"Failed to zip (return code $res)")
+      }
+      val store = BerkeleyDB.factory(config.ws, createIfNecessary = false)
+      Workspace.read(config.ws, store) match {
+        case d: Workspace.Durable =>
+          type S = Durable
+          implicit val _d: Workspace.Durable = d
+
+          println(s"Rendering ($it/${config.iterations})...")
+          if (it > 1) Thread.sleep(1000)
+
+          try {
+            val futRender: Future[Unit] = d.system.step { implicit tx =>
+              if (it === 1 && config.prepare) Preparation .process[S]()
+              if (config.render             ) Layer       .process[S]() else Future.successful(())
+            }
+
+            try {
+              Await.result(futRender, Duration.Inf)
+            } finally {
+              d.close()
+            }
+
+          } catch {
+            case NonFatal(ex) =>
+              ex.printStackTrace()
+          }
+        case other =>
+          println(s"Cannot handle workspace $other")
+          other.close()
+          sys.exit(1)
+      }
     }
-    val store = BerkeleyDB.factory(config.ws, createIfNecessary = false)
-    Workspace.read(config.ws, store) match {
-      case d: Workspace.Durable =>
-        type S = Durable
-        implicit val _d: Workspace.Durable = d
-
-        println("Rendering...")
-
-        val futRender: Future[Unit] = d.system.step { implicit tx =>
-          if (config.prepare) Preparation .process[S]()
-          if (config.render ) Layer       .process[S]() else Future.successful(())
-        }
-
-        try {
-          Await.result(futRender, Duration.Inf)
-        } finally {
-          d.close()
-        }
-
-        sys.exit()
-
-      case other =>
-        println(s"Cannot handle workspace $other")
-        other.close()
-        sys.exit(1)
-    }
+    sys.exit()
   }
 }

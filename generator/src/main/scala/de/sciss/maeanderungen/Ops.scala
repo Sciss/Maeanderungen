@@ -27,7 +27,7 @@ object Ops {
 
   implicit final class MaeanderungenDoubleOps(private val x: Double) extends AnyVal {
     def coin[Tx <: TxnLike]()(implicit tx: Tx, r: Random[Tx]): Boolean = {
-      val i = r.nextDouble
+      val i = r.nextDouble()
       i < x
     }
   }

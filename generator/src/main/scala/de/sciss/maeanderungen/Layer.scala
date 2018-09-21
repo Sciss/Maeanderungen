@@ -104,6 +104,7 @@ object Layer {
                                     pan           : Double,
                                     pTape1        : Proc[S],
                                     pTape2        : Proc[S],
+                                    pTapeAll      : Proc[S],
                                     pMain         : Proc[S],
                                     folderTemp    : Folder[S],
     )(
@@ -157,8 +158,9 @@ object Layer {
     val fRender       = mkFolder(root, "renderings")
     val fTemp         = mkFolder(root, "temp")
     val fAux          = mkFolder(root, "aux")
-    val pTape1        = mkObj[S, Proc](fAux, "tape-1", DEFAULT_VERSION)(mkTapeGraph(1))
-    val pTape2        = mkObj[S, Proc](fAux, "tape-2", DEFAULT_VERSION)(mkTapeGraph(2))
+    val pTape1        = mkObj[S, Proc](fAux, "tape-1"   , DEFAULT_VERSION)(mkTapeGraph(1))
+    val pTape2        = mkObj[S, Proc](fAux, "tape-2"   , DEFAULT_VERSION)(mkTapeGraph(2))
+    val pTapeAll      = mkObj[S, Proc](fAux, "tape-all" , DEFAULT_VERSION)(mkTapeGraph(config.numChannels))
     val now           = System.currentTimeMillis()
     val tlOpt         = fRender.iterator.collect {
       case tlm: Timeline.Modifiable[S] => tlm
@@ -243,6 +245,7 @@ object Layer {
       pan           = pan,
       pTape1        = pTape1,
       pTape2        = pTape2,
+      pTapeAll      = pTapeAll,
       pMain         = pMain,
       folderTemp    = fTemp,
     )
@@ -406,7 +409,7 @@ object Layer {
   }
 
   def executeReplacement[S <: Sys[S]](replace: Replacement[S], cueBg: AudioCue.Obj[S], offCue: Long)
-                                     (implicit tx: S#Tx, ctx: Context[S]): Unit = {
+                                     (implicit tx: S#Tx, ctx: Context[S], config: Config): Unit = {
     import ctx.cursor
     replace.map.foreach {
       case (oldEntry, newList) =>
@@ -501,7 +504,7 @@ object Layer {
 
   def executePlacement[S <: Sys[S]](placement: ISeq[PlacedRegion], gain: Double, target: Timeline.Modifiable[S],
                                     pMain: Proc[S])
-                                   (implicit tx: S#Tx, ctx: Context[S]): Unit = {
+                                   (implicit tx: S#Tx, ctx: Context[S], config: Config): Unit = {
     import ctx.{pMain => _, _}
     val vec       = placement.toVector
     val intelObj  = BooleanObj.newVar[S](intelligible)
