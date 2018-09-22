@@ -61,6 +61,9 @@ lazy val generator = project.withId(s"$baseNameL-generator").in(file("generator"
   .settings(commonSettings)
   .settings(
     name := s"$baseName-Generator",
+    mainClass       in assembly := Some("de.sciss.maeanderungen.Generator"),
+    assemblyJarName in assembly := "Generator.jar",
+    target          in assembly := baseDirectory.value,
     libraryDependencies ++= Seq(
       "de.sciss"          %% "mellite"          % "2.27.2",
       "de.sciss"          %% "soundprocesses"   % "3.21.3",
