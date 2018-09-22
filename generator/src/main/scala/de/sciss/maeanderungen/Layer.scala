@@ -649,7 +649,7 @@ object Layer {
     val startPos      = if (i < 0) 0L else breakPauses(i).span.stop
     val stopPos0      = startPos + cutLen
     val j             = breakPauses.indexWhere(_.span.start >= stopPos0, i + 1)
-    val stopPos       = if (j < 0) matNumFrames - startPos else breakPauses(j).span.start
+    val stopPos       = if (j <= i) math.min(startPos + cutLen, matNumFrames) else breakPauses(j).span.start
     val matSpan = Span(startPos, stopPos)
     putPlainTextIntel(matSpan)
   }
