@@ -29,7 +29,7 @@ import de.sciss.synth.proc.{AudioCue, Color, GenContext, TimeRef, Timeline, Work
 import de.sciss.synth.{io, proc}
 
 object Preparation {
-  val DEFAULT_VERSION = 16
+  val DEFAULT_VERSION = 17
 
   def process[S <: Sys[S]]()(implicit tx: S#Tx, workspace: Workspace[S]): Unit = {
     val r             = workspace.root
@@ -45,7 +45,7 @@ object Preparation {
     import de.sciss.fscape.lucre.graph._
 
     f.setGraph {
-      DC(0).take(1).poll(0, "FUCK YOU")
+      DC(17).take(1).poll(0, "VERSION")
       val threshLoud    = 15.0
       val in0           = AudioFileIn("in")
       val in            = Mix.MonoEqP(in0.elastic(7)) // XXX TOD -- Mix should be taking care of this

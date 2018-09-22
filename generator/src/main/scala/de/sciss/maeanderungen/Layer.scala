@@ -232,6 +232,7 @@ object Layer {
     }
 
     val chanOff = rangeRand(0, config.numChannels - 2)
+    println(s"chanOff = $chanOff")
 
     implicit val ctx: Context[S] = Context(
       tl            = tl,
