@@ -29,10 +29,10 @@ lazy val cam = project.withId(s"$baseNameL-cam").in(file("cam"))
       "de.sciss"          %% "numbers"          % "0.2.0",
       "de.sciss"          %% "kollflitz"        % "0.2.2",
       "de.sciss"          %% "equal"            % "0.1.2",
-      "de.sciss"          %% "fscape-core"      % "2.17.1",
+      "de.sciss"          %% "fscape-core"      % deps.main.fscape,
       "de.sciss"          %  "jrpicam"          % "0.2.0",
       "com.pi4j"          %  "pi4j-core"        % "1.1",
-      "com.github.scopt"  %% "scopt"            % "3.7.0"
+      "com.github.scopt"  %% "scopt"            % deps.main.scopt
     )
   )
 
@@ -47,12 +47,12 @@ lazy val cracks = project.withId(s"$baseNameL-cracks").in(file("cracks"))
       "de.sciss"          %% "kollflitz"        % "0.2.2",
       "de.sciss"          %% "equal"            % "0.1.2",
       "de.sciss"          %% "topology"         % "1.1.0",
-      "de.sciss"          %% "fscape-core"      % "2.17.1",
-      "de.sciss"          %% "travelling-ants"  % "0.1.1",
+      "de.sciss"          %% "fscape-core"      % deps.main.fscape,
+      "de.sciss"          %% "travelling-ants"  % deps.main.travellingAnts,
       "de.sciss"          %  "jrpicam"          % "0.2.0",
-//      "de.sciss"          %% "poirot"           % "0.3.0",
+//      "de.sciss"          %% "poirot"           % deps.main.poirot,
       "com.pi4j"          %  "pi4j-core"        % "1.1",
-      "com.github.scopt"  %% "scopt"            % "3.7.0"
+      "com.github.scopt"  %% "scopt"            % deps.main.scopt
     ),
     mainClass in (Compile, run) := Some("de.sciss.maeanderungen.Cracks")
   )
@@ -65,14 +65,25 @@ lazy val generator = project.withId(s"$baseNameL-generator").in(file("generator"
     assemblyJarName in assembly := "Generator.jar",
     target          in assembly := baseDirectory.value,
     libraryDependencies ++= Seq(
-      "de.sciss"          %% "mellite"          % "2.27.2",
-      "de.sciss"          %% "soundprocesses"   % "3.21.3",
-      "de.sciss"          %% "fscape"           % "2.17.3",
-      "de.sciss"          %% "travelling-ants"  % "0.1.1",
-      "de.sciss"          %% "poirot"           % "0.3.0",
-      "com.github.scopt"  %% "scopt"            % "3.7.0"
+      "de.sciss"          %% "mellite"          % deps.main.mellite,
+      "de.sciss"          %% "soundprocesses"   % deps.main.soundProcesses,
+      "de.sciss"          %% "fscape"           % deps.main.fscape,
+      "de.sciss"          %% "travelling-ants"  % deps.main.travellingAnts,
+      "de.sciss"          %% "poirot"           % deps.main.poirot,
+      "com.github.scopt"  %% "scopt"            % deps.main.scopt
     ),
     scalacOptions += "-Yrangepos",  // this is needed to extract source code
     fork in run := true,
     mainClass in (Compile, run) := Some("de.sciss.maeanderungen.Generator")
   )
+
+lazy val deps = new {
+  val main = new {
+    val fscape         = "2.17.3"
+    val mellite        = "2.27.2"
+    val poirot         = "0.3.0"
+    val scopt          = "3.7.0"
+    val soundProcesses = "3.21.3"
+    val travellingAnts = "0.1.1"
+  }
+}
