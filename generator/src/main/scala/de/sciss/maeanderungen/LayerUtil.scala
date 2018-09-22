@@ -19,7 +19,7 @@ import de.sciss.fscape.{Graph, stream}
 import de.sciss.kollflitz.Vec
 import de.sciss.lucre.artifact.{Artifact, ArtifactLocation}
 import de.sciss.lucre.bitemp.BiGroup
-import de.sciss.lucre.expr.{BooleanObj, DoubleObj, LongObj, SpanLikeObj}
+import de.sciss.lucre.expr.{BooleanObj, DoubleObj, IntObj, LongObj, SpanLikeObj}
 import de.sciss.lucre.stm
 import de.sciss.lucre.stm.Obj
 import de.sciss.lucre.synth.{Server, Sys}
@@ -131,6 +131,12 @@ object LayerUtil {
       val panObj = DoubleObj.newVar[S](ctx.pan)
       prAttr.put("pan", panObj)
     }
+    if (config.numChannels > 2 && ctx.chanOff > 0) {
+      val chanObj1 = IntObj.newVar[S](ctx.chanOff)
+      val chanObj2 = IntObj.newVar[S](ctx.chanOff + 1)
+      prAttr.put("ch-1", chanObj1)
+      prAttr.put("ch-2", chanObj2)
+    }
 
     tl.add(span, p)
     import ctx.cursor
@@ -233,6 +239,36 @@ object LayerUtil {
       val out   = Vector.tabulate(config.numChannels) { ch =>
         sig1 * (ch1 sig_== ch) + sig2 * (ch2 sig_== ch)
       }
+      ScanOut(out)
+    }
+
+    p.attr.put(Proc.attrSource, Code.Obj.newVar(Code.SynthGraph(source)))
+
+    p
+  }
+
+  def mkTapeGraphAll[S <: Sys[S]]()(implicit tx: S#Tx, config: Config): Proc[S] = {
+    val p = Proc[S]
+    import synth.proc.graph.Ops._
+    import synth.proc.graph._
+    import synth.ugen.{VDiskIn => _, _}
+
+    val source = s"""val disk  = VDiskIn.ar("sig")
+                    |val gain  = "gain".kr(1.0)
+                    |val mute  = "mute".kr(0.0)
+                    |val env   = FadeInOut.ar
+                    |val amp   = env * ((1 - mute) * gain)
+                    |val out   = disk * amp
+                    |ScanOut(out)
+                    |""".stripMargin
+
+    p.graph() = SynthGraph {
+      val disk  = VDiskIn.ar("sig")
+      val gain  = "gain".kr(1.0)
+      val mute  = "mute".kr(0.0)
+      val env   = FadeInOut.ar
+      val amp   = env * ((1 - mute) * gain)
+      val out   = disk * amp
       ScanOut(out)
     }
 

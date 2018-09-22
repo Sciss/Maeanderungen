@@ -119,6 +119,10 @@ object Builder {
     } else {
       implicit val gen: GenContext[S] = GenContext[S]
       val r = fsc.run()
+//      de.sciss.lucre.swing.deferTx {
+////        de.sciss.fscape.gui.SimpleGUI(r.control)
+//        de.sciss.maeanderungen.SimpleGUI(r.control)
+//      }
       r.reactNow { implicit tx => state =>
         if (state.isComplete) {
           val tr = r.result.get

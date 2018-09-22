@@ -69,6 +69,13 @@ object Ops {
     r.nextDouble() * span + lo
   }
 
+  def rangeRand[Tx <: TxnLike](lo: Int, hi: Int)(implicit tx: Tx, r: Random[Tx]): Int =
+    if (lo <= hi) {
+      r.nextInt(hi - lo + 1) + lo
+    } else {
+      r.nextInt(lo - hi + 1) + hi
+    }
+
   def expRand[Tx <: TxnLike](lo: Double, hi: Double)(implicit tx: Tx, r: Random[Tx]): Double = {
     val lo1     = math.min(lo, hi)
     val hi1     = math.max(lo, hi)

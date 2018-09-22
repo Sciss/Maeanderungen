@@ -102,6 +102,7 @@ object Layer {
                                     complete      : Boolean,
                                     sequential    : Boolean,
                                     pan           : Double,
+                                    chanOff       : Int,
                                     pTape1        : Proc[S],
                                     pTape2        : Proc[S],
                                     pTapeAll      : Proc[S],
@@ -160,7 +161,7 @@ object Layer {
     val fAux          = mkFolder(root, "aux")
     val pTape1        = mkObj[S, Proc](fAux, "tape-1"   , DEFAULT_VERSION)(mkTapeGraph(1))
     val pTape2        = mkObj[S, Proc](fAux, "tape-2"   , DEFAULT_VERSION)(mkTapeGraph(2))
-    val pTapeAll      = mkObj[S, Proc](fAux, "tape-all" , DEFAULT_VERSION)(mkTapeGraph(config.numChannels))
+    val pTapeAll      = mkObj[S, Proc](fAux, "tape-all" , DEFAULT_VERSION)(mkTapeGraphAll())
     val now           = System.currentTimeMillis()
     val tlOpt         = fRender.iterator.collect {
       case tlm: Timeline.Modifiable[S] => tlm
@@ -230,6 +231,8 @@ object Layer {
       x.linLin(0.0, 1.0, -config.maxPan, +config.maxPan)
     }
 
+    val chanOff = rangeRand(0, config.numChannels - 2)
+
     implicit val ctx: Context[S] = Context(
       tl            = tl,
       tlNumFrames   = numFrames,
@@ -243,6 +246,7 @@ object Layer {
       complete      = partial.complete,
       sequential    = partial.sequential,
       pan           = pan,
+      chanOff       = chanOff,
       pTape1        = pTape1,
       pTape2        = pTape2,
       pTapeAll      = pTapeAll,
