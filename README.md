@@ -40,3 +40,6 @@ Build generator:
 Run args
 
     -w /data/projects/Maeanderungen/workspaces/Maeanderungen180921-octo-1.mllt -b /data/projects/Maeanderungen --min-dur 900 --max-dur 900 --backup --text-sound-ratio 1.2 --iterations 50 --num-channels 8 --no-prepare
+
+N.B.: It seems `assembly` puts in an older fsc version. Confirmed to be correctly running
+through IntelliJ.
