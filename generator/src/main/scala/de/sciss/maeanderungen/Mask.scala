@@ -87,7 +87,7 @@ object Mask {
       val in1Mag    = in1F.complex.mag
       val in2Mag    = in2F.complex.mag
 
-      val blurTime  = ((2.0 * sr) / stepSize) .ceil.toInt
+      val blurTime  = ((config.maskBlurTime * sr) / stepSize) .ceil.toInt
       val blurFreq  = (200.0 / (sr / fftSize)).ceil.toInt
       val columns   = blurTime * 2 + 1
       def post      = DC(0.0).take(blurTime * fftSizeH)
@@ -97,7 +97,7 @@ object Mask {
       // println(s"blurTime $blurTime, blurFreq $blurFreq, winSize $winSize, stepSize $stepSize, fftSize $fftSize")
 
       val mask      = Masking(fg = in1Pad, bg = in2Pad, rows = fftSizeH, columns = columns,
-        threshNoise = -56.0.dbAmp /* 0.5e-3 */, threshMask = -6.0.dbAmp /* 0.5 */, blurRows = blurFreq, blurColumns = blurTime)
+        threshNoise = config.maskThreshNoiseDb.dbAmp, threshMask = config.maskThreshDistanceDb.dbAmp, blurRows = blurFreq, blurColumns = blurTime)
 
       //    Plot1D(mask.drop(fftSizeH * 16).ampDb, size = fftSizeH)
 

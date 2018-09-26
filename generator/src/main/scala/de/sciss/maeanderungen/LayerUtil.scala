@@ -131,9 +131,9 @@ object LayerUtil {
       val panObj = DoubleObj.newVar[S](ctx.pan)
       prAttr.put("pan", panObj)
     }
-    if (config.numChannels > 2 && ctx.chanOff > 0) {
-      val chanObj1 = IntObj.newVar[S](ctx.chanOff)
-      val chanObj2 = IntObj.newVar[S](ctx.chanOff + 1)
+    if (config.numChannels > 2) {
+      val chanObj1 = IntObj.newVar[S](ctx.chanOff1)
+      val chanObj2 = IntObj.newVar[S](ctx.chanOff2)
       prAttr.put("ch-1", chanObj1)
       prAttr.put("ch-2", chanObj2)
     }

@@ -25,7 +25,7 @@ object Category {
     0.1 -> ChaoticEnumerations,
     0.1 -> Acrostics,
     0.08 -> PoeticManuals,
-    0.33 -> MetaText
+    0.37 -> MetaText
   ))
 
   val weightedSound: Vec[(Double, Sound)] = normalizeWeights(Vec(

@@ -102,7 +102,8 @@ object Layer {
                                     complete      : Boolean,
                                     sequential    : Boolean,
                                     pan           : Double,
-                                    chanOff       : Int,
+                                    chanOff1      : Int,
+                                    chanOff2      : Int,
                                     pTape1        : Proc[S],
                                     pTape2        : Proc[S],
                                     pTapeAll      : Proc[S],
@@ -231,8 +232,12 @@ object Layer {
       x.linLin(0.0, 1.0, -config.maxPan, +config.maxPan)
     }
 
-    val chanOff = rangeRand(0, config.numChannels - 2)
-    println(s"chanOff = $chanOff")
+    val chanOff1 = rangeRand(0, config.numChannels - 1)
+    val chanOff2 = {
+      val v = rangeRand(0, config.numChannels - 2)
+      if (v < chanOff1) v else v + 1
+    }
+    println(s"chanOff1 = $chanOff1, chanOff2 = $chanOff2")
 
     implicit val ctx: Context[S] = Context(
       tl            = tl,
@@ -247,7 +252,8 @@ object Layer {
       complete      = partial.complete,
       sequential    = partial.sequential,
       pan           = pan,
-      chanOff       = chanOff,
+      chanOff1      = chanOff1,
+      chanOff2      = chanOff2,
       pTape1        = pTape1,
       pTape2        = pTape2,
       pTapeAll      = pTapeAll,

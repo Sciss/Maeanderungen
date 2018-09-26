@@ -126,6 +126,20 @@ object Generator {
         .validate { v => if (v >= 1) success else failure("Must be >= 1") }
         .action { (v, c) => c.copy(iterations = v) }
 
+      opt[Double]("mask-noise-level")
+        .text(s"Masking noise level in decibels (default: ${default.maskThreshNoiseDb})")
+        .validate { v => if (v <= 0.0) success else failure("Must be <= 0") }
+        .action { (v, c) => c.copy(maskThreshNoiseDb = v) }
+
+      opt[Double]("mask-distance-level")
+        .text(s"Masking foreground-background distance in decibels (default: ${default.maskThreshDistanceDb})")
+        .validate { v => if (v <= 6.0) success else failure("Must be <= 6") }
+        .action { (v, c) => c.copy(maskThreshDistanceDb = v) }
+
+      opt[Double]("mask-blue-time")
+        .text(s"Masking blurring time in seconds (default: ${default.maskBlurTime})")
+        .validate { v => if (v > 0.0) success else failure("Must be > 0") }
+        .action { (v, c) => c.copy(maskBlurTime = v) }
     }
     p.parse(args, default).fold(sys.exit(1)) { implicit config => run() }
   }
