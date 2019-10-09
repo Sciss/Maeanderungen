@@ -54,7 +54,7 @@ object Util {
       val high: A = fromInt(i + 1) * binWidth + min1
       val isFirst = i == 0
       val isLast  = i == numBins - 1
-      data.count(x => (isFirst || x >= low) && (isLast || x < high)) // IntelliJ highlight bug
+      data.count(x => (isFirst || x >= low) && (isLast || x < high))
     }
     accum
   }
@@ -68,7 +68,7 @@ object Util {
       bla.toInt -> num
     } .toVector
     val dataCol = data.toXYSeriesCollection(title)
-    val chart   = XYLineChart(dataCol)  // IntelliJ highlight bug
+    val chart   = XYLineChart(dataCol)
     chart.title = title
     //    chart.legend = false
     mkNiceChart(chart)

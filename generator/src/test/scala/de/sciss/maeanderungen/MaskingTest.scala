@@ -53,7 +53,7 @@ object MaskingTest extends App {
 
     println(s"blurTime $blurTime, blurFreq $blurFreq, winSize $winSize, stepSize $stepSize, fftSize $fftSize")
 
-    val mask      = Masking(fg = in1Pad, bg = in2Pad, rows = fftSizeH, columns = columns,
+    val mask      = Masking2D(fg = in1Pad, bg = in2Pad, rows = fftSizeH, columns = columns,
       threshNoise = -56.0.dbAmp /* 0.5e-3 */, threshMask = -6.0.dbAmp /* 0.5 */, blurRows = blurFreq, blurColumns = blurTime)
 
 //    Plot1D(mask.drop(fftSizeH * 16).ampDb, size = fftSizeH)

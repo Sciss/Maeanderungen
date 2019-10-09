@@ -14,7 +14,6 @@
 package de.sciss.maeanderungen
 
 import de.sciss.file.{File, file}
-import sun.nio.cs.ext.DoubleByteEncoder
 
 case class Config(ws                  : File    = file("material.mllt"),
                   baseDir             : File    = file("base"),

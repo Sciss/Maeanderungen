@@ -61,7 +61,7 @@ object PitchTest extends App {
     val dly         = WindowMaxIndex(cep.elastic(2) * lmOk, size = fftSize)
     dly.poll(0, "dly-0")
     val found       = dly > 0
-    val freq0       = ((dly).max(1).reciprocal * sampleRate) * found.elastic()
+    val freq0       = (dly.max(1).reciprocal * sampleRate) * found.elastic()
 
     val loud        = Loudness(inW, sampleRate = sampleRate, size = fftSize, spl = 70, diffuse = 1)
     val freq1       = freq0 * (loud > 15)

@@ -28,13 +28,13 @@ import de.sciss.maeanderungen.Builder._
 import de.sciss.maeanderungen.LayerUtil._
 import de.sciss.maeanderungen.Ops._
 import de.sciss.maeanderungen.Util.{framesToTime, spanToTime}
-import de.sciss.mellite.gui.ObjView
-import de.sciss.mellite.gui.edit.Edits
+import de.sciss.mellite.ObjView
+import de.sciss.mellite.edit.Edits
 import de.sciss.numbers.Implicits._
 import de.sciss.span.Span
-import de.sciss.synth.Curve
 import de.sciss.synth.proc.Implicits._
-import de.sciss.synth.proc.{AudioCue, FadeSpec, Proc, SoundProcesses, TimeRef, Timeline, Workspace}
+import de.sciss.synth.proc.{AudioCue, FadeSpec, Proc, SoundProcesses, TimeRef, Timeline}
+import de.sciss.synth.{Curve, proc}
 
 import scala.annotation.tailrec
 import scala.concurrent.Future
@@ -76,7 +76,7 @@ object Layer {
                                               ) {
 
     def copyTo(context: Context[S]): Context[S] = {
-      import context.{cursor, rnd, workspace}
+      import context.{cursor, rnd, universe}
       context.copy(
         material      = material,
         matNumFrames  = matNumFrames,
@@ -110,7 +110,7 @@ object Layer {
                                     pMain         : Proc[S],
                                     folderTemp    : Folder[S],
     )(
-      implicit val rnd: Random[S#Tx], val workspace: Workspace[S], val cursor: Cursor[S]
+      implicit val rnd: Random[S#Tx], val universe: proc.Universe[S], val cursor: Cursor[S]
     )
 
   def log(what: => String): Unit =
@@ -154,9 +154,9 @@ object Layer {
     )
   }
 
-  def process[S <: Sys[S]]()(implicit tx: S#Tx, workspace: Workspace[S], config: Config): Future[Unit] = {
-    implicit val cursor: Cursor[S] = workspace.cursor
-    val root          = workspace.root
+  def process[S <: Sys[S]]()(implicit tx: S#Tx, universe: proc.Universe[S], config: Config): Future[Unit] = {
+    implicit val cursor: Cursor[S] = universe.cursor
+    val root          = universe.workspace.root
     val fRender       = mkFolder(root, "renderings")
     val fTemp         = mkFolder(root, "temp")
     val fAux          = mkFolder(root, "aux")

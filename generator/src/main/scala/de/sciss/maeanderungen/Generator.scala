@@ -16,8 +16,8 @@ package de.sciss.maeanderungen
 import de.sciss.equal.Implicits._
 import de.sciss.file._
 import de.sciss.lucre.stm.store.BerkeleyDB
-import de.sciss.mellite.Mellite
-import de.sciss.synth.proc.{Durable, Workspace}
+import de.sciss.synth.proc
+import de.sciss.synth.proc.{Durable, SoundProcesses, Workspace}
 
 import scala.concurrent.duration.Duration
 import scala.concurrent.{Await, Future}
@@ -145,7 +145,8 @@ object Generator {
   }
 
   def run()(implicit config: Config): Unit = {
-    Mellite.initTypes()
+//    Mellite.initTypes()
+    SoundProcesses.init()
 
     for (it <- 1 to config.iterations) {
       if (config.backupWorkspace && config.ws.exists()) {
@@ -166,7 +167,9 @@ object Generator {
           if (it > 1) Thread.sleep(1000)
 
           try {
-            val futRender: Future[Unit] = d.system.step { implicit tx =>
+            implicit val system: S = _d.system
+            val futRender: Future[Unit] = system.step { implicit tx =>
+              implicit val u: proc.Universe[S] = proc.Universe[S]()
               if (it === 1 && config.prepare) Preparation .process[S]()
               if (config.render             ) Layer       .process[S]() else Future.successful(())
             }

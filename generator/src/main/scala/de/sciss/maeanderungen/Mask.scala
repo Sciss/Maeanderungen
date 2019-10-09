@@ -96,7 +96,7 @@ object Mask {
 
       // println(s"blurTime $blurTime, blurFreq $blurFreq, winSize $winSize, stepSize $stepSize, fftSize $fftSize")
 
-      val mask      = Masking(fg = in1Pad, bg = in2Pad, rows = fftSizeH, columns = columns,
+      val mask      = Masking2D(fg = in1Pad, bg = in2Pad, rows = fftSizeH, columns = columns,
         threshNoise = config.maskThreshNoiseDb.dbAmp, threshMask = config.maskThreshDistanceDb.dbAmp, blurRows = blurFreq, blurColumns = blurTime)
 
       //    Plot1D(mask.drop(fftSizeH * 16).ampDb, size = fftSizeH)

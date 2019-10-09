@@ -44,7 +44,7 @@ object SoundTransforms {
       def make[S <: Sys[S]]()(implicit tx: S#Tx, ctx: Context[S]): Future[Source[S#Tx, AudioCue.Obj[S]]] = {
         import ctx.rnd
         val inverse   = 0.5.coin()
-        val fltLen    = rangeRand(294, 661).toInt
+        val fltLen    = rangeRand(294, 661)
         mkBleach[S](inverse = inverse, fltLen = fltLen)
       }
     }

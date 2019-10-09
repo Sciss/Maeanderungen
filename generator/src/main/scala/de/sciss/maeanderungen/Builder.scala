@@ -22,7 +22,7 @@ import de.sciss.lucre.stm.{Cursor, Folder, Obj}
 import de.sciss.lucre.synth.Sys
 import de.sciss.synth.proc
 import de.sciss.synth.proc.Implicits._
-import de.sciss.synth.proc.{Action, AudioCue, GenContext, SoundProcesses, Timeline, Workspace}
+import de.sciss.synth.proc.{Action, ActionRaw, AudioCue, GenContext, SoundProcesses, Timeline, Workspace}
 
 import scala.concurrent.{Future, Promise}
 import scala.language.higherKinds
@@ -76,7 +76,8 @@ object Builder {
     checkMkObj(opt, key, version)(create)(_ => ())(a.put(key, _))
   }
 
-  def createMetaData[S <: Sys[S]](cue: AudioCue.Obj[S])(implicit tx: S#Tx, workspace: Workspace[S]): Future[Unit] = {
+  def createMetaData[S <: Sys[S]](cue: AudioCue.Obj[S])(implicit tx: S#Tx, universe: proc.Universe[S]): Future[Unit] = {
+    implicit val workspace: Workspace[S] = universe.workspace
     import workspace.root
     implicit val cursor: Cursor[S] = workspace.cursor
 
@@ -107,8 +108,8 @@ object Builder {
 
     def done()(implicit tx: S#Tx): Unit = {
       val tr = Try {
-        val actDone   = self.attr.![Action]("done")
-        val uDone     = Action.Universe(actDone, workspace, invoker = Some(fsc))
+        val actDone   = self.attr.![ActionRaw]("done")
+        val uDone     = Action.Universe(actDone, /*workspace,*/ invoker = Some(fsc))
         actDone.execute(uDone)
       }
       tx.afterCommit(res.complete(tr))

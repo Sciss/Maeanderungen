@@ -34,8 +34,8 @@ object Preparation {
   def process[S <: Sys[S]]()(implicit tx: S#Tx, workspace: Workspace[S]): Unit = {
     val r             = workspace.root
     val fAna          = mkFolder(r, "analysis")
-    mkObj[S, proc.Action](fAna, "find-pauses", DEFAULT_VERSION)(mkActionFindPauses[S]())
-    mkObj[S, proc.Action](fAna, "remove-meta", DEFAULT_VERSION)(mkActionRemoveMeta[S]())
+    mkObj[S, proc.ActionRaw](fAna, "find-pauses", DEFAULT_VERSION)(mkActionFindPauses[S]())
+    mkObj[S, proc.ActionRaw](fAna, "remove-meta", DEFAULT_VERSION)(mkActionRemoveMeta[S]())
   }
 
   def mkFScapeFindPauses[S <: Sys[S]]()(implicit tx: S#Tx): FScape[S] = {
@@ -110,9 +110,9 @@ object Preparation {
     f
   }
 
-  def mkActionFindPauses[S <: Sys[S]]()(implicit tx: S#Tx): proc.Action[S] = {
-    import proc.Action
-    val act0 = proc.Action.apply[S] { universe =>
+  def mkActionFindPauses[S <: Sys[S]]()(implicit tx: S#Tx): proc.ActionRaw[S] = {
+    import proc.ActionRaw
+    val act0 = proc.ActionRaw.apply[S] { universe =>
       import de.sciss.fscape.lucre.FScape
       import universe._
       //----crop
@@ -149,8 +149,8 @@ object Preparation {
         aFsc.put("is-male", BooleanObj.newConst(isMale))
 
         def done()(implicit tx: S#Tx): Unit = {
-          val actDone   = self.attr.![Action]("done")
-          val uDone     = Action.Universe(actDone, workspace, invoker = Some(fsc))
+          val actDone   = self.attr.![ActionRaw]("done")
+          val uDone     = ActionRaw.Universe(actDone, /*workspace,*/ invoker = Some(fsc))
           actDone.execute(uDone)
         }
 
@@ -171,14 +171,14 @@ object Preparation {
     }
 
     val act     = wrapAction(act0)
-    val fsc     = mkObjIn[S, FScape     ](act, "fsc" , DEFAULT_VERSION)(mkFScapeFindPauses    [S]())
-    val actDone = mkObjIn[S, proc.Action](act, "done", DEFAULT_VERSION)(mkActionFindPausesDone[S]())
+    val fsc     = mkObjIn[S, FScape        ](act, "fsc" , DEFAULT_VERSION)(mkFScapeFindPauses    [S]())
+    val actDone = mkObjIn[S, proc.ActionRaw](act, "done", DEFAULT_VERSION)(mkActionFindPausesDone[S]())
     fsc.attr.put("done", actDone)
     act
   }
 
-  def mkActionRemoveMeta[S <: Sys[S]]()(implicit tx: S#Tx): proc.Action[S] = {
-    val act0 = proc.Action.apply[S] { universe =>
+  def mkActionRemoveMeta[S <: Sys[S]]()(implicit tx: S#Tx): proc.ActionRaw[S] = {
+    val act0 = proc.ActionRaw.apply[S] { universe =>
       import universe._
       //----crop
       println("----REMOVE META----")
@@ -197,20 +197,20 @@ object Preparation {
     act
   }
 
-  private def wrapAction[S <: Sys[S]](value: proc.Action[S])(implicit tx: S#Tx): proc.Action[S] =
+  private def wrapAction[S <: Sys[S]](value: proc.ActionRaw[S])(implicit tx: S#Tx): proc.ActionRaw[S] =
     value match {
-      case proc.Action.Var(vr) => vr
+      case proc.ActionRaw.Var(vr) => vr
       case _ =>
-      val act = proc.Action.Var(value)
+      val act = proc.ActionRaw.Var(value)
       value.attr.get(attrSource).foreach { src =>
         act.attr.put(attrSource, src)
       }
       act
     }
 
-  def mkActionFindPausesDone[S <: Sys[S]]()(implicit tx: S#Tx): proc.Action[S] = {
-    import proc.Action
-    val act0 = proc.Action.apply[S] { universe =>
+  def mkActionFindPausesDone[S <: Sys[S]]()(implicit tx: S#Tx): proc.ActionRaw[S] = {
+    import proc.ActionRaw
+    val act0 = proc.ActionRaw.apply[S] { universe =>
       import de.sciss.fscape.lucre.FScape
       import universe._
       //----crop
@@ -374,8 +374,8 @@ object Preparation {
       }
 
       if (shouldIter) {
-        val actIter = root.![Folder]("analysis").![Action]("find-pauses")
-        val uIter   = Action.Universe(actIter, workspace)
+        val actIter = root.![Folder]("analysis").![ActionRaw]("find-pauses")
+        val uIter   = ActionRaw.Universe(actIter/*, workspace*/)
         actIter.execute(uIter)
       }
     }

@@ -19,8 +19,10 @@ import de.sciss.ants.{Ant, Colony, ConnectedGraph}
 import de.sciss.file._
 import de.sciss.fscape.Graph
 import de.sciss.fscape.stream.Control
+import de.sciss.kollflitz.Vec
 import de.sciss.synth.io.{AudioFile, AudioFileSpec}
 
+import scala.annotation.tailrec
 import scala.collection.mutable
 import scala.concurrent.duration.Duration
 import scala.concurrent.{Await, Future, Promise}
@@ -136,6 +138,7 @@ object RhizomeSim {
       dos.writeInt(GRAPH_COOKIE)
 
       def run(): List[SimEdge] = try {
+        @tailrec
         def loop(rem: List[Vertex], res: List[SimEdge], mapTemp: Map[Vertex, File]): List[SimEdge] =
           rem match {
             case v1 :: tail if tail.nonEmpty =>
@@ -222,7 +225,7 @@ object RhizomeSim {
   }
 
   def mkCorrelationGraph(fileA: File, fileB: File, melBands: Int = 64): (Graph, Future[Double]) = {
-    val p = Promise[Double]()
+    val p = Promise[Vec[Double]]()
     val g = Graph {
       import de.sciss.fscape._
       import de.sciss.numbers.Implicits._
@@ -266,8 +269,12 @@ object RhizomeSim {
 
       val max       = RunningMax(corr).last / energyT * (fftSize/2)
 
-      Fulfill(max, p)
+//      Fulfill(max, p)
+      DebugDoublePromise(max, p)
     }
-    (g, p.future)
+
+    import scala.concurrent.ExecutionContext.Implicits.global
+
+    (g, p.future.map(_.head))
   }
 }

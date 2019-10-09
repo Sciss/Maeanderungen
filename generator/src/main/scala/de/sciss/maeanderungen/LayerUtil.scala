@@ -25,16 +25,15 @@ import de.sciss.lucre.stm.Obj
 import de.sciss.lucre.synth.{Server, Sys}
 import de.sciss.maeanderungen.Layer.{Context, RegionAt, attrIntel}
 import de.sciss.maeanderungen.Ops._
-import de.sciss.mellite.ProcActions
-import de.sciss.mellite.gui.ActionBounceTimeline
-import de.sciss.mellite.gui.edit.Edits
+import de.sciss.mellite.edit.Edits
 import de.sciss.mellite.util.Gain
+import de.sciss.mellite.{ActionBounce, ProcActions}
 import de.sciss.span.Span
 import de.sciss.synth
 import de.sciss.synth.io.{AudioFile, SampleFormat}
 import de.sciss.synth.proc.Implicits._
 import de.sciss.synth.proc.{AudioCue, Code, Color, FadeSpec, ObjKeys, Proc, SoundProcesses, TimeRef, Timeline}
-import de.sciss.synth.{SynthGraph, proc}
+import de.sciss.synth.{Client, SynthGraph, proc}
 
 import scala.concurrent.{Future, Promise}
 import scala.util.control.NonFatal
@@ -251,7 +250,7 @@ object LayerUtil {
     val p = Proc[S]
     import synth.proc.graph.Ops._
     import synth.proc.graph._
-    import synth.ugen.{VDiskIn => _, _}
+    import synth.ugen.{VDiskIn => _}
 
     val source = s"""val disk  = VDiskIn.ar("sig")
                     |val gain  = "gain".kr(1.0)
@@ -425,25 +424,27 @@ object LayerUtil {
     val p = Promise[File]
     val tlH                 = tx.newHandle(tl)
     val sCfg                = Server.Config()
+    val cCfg                = Client.Config()
     sCfg.outputBusChannels  = config.numChannels
     sCfg.inputBusChannels   = 0
     sCfg.sampleRate         = config.sampleRate
     tx.afterCommit {
-      import ctx.cursor
+      import ctx.universe
       val dirTmp          = config.baseDir / "audio_work" / "temp"
       dirTmp.mkdirs()
       val fTmp            = File.createTempIn(dirTmp, suffix = ".aif", deleteOnExit = config.deleteTempFiles)
       sCfg.nrtOutputPath  = fTmp.path
-      val settings        = ActionBounceTimeline.PerformSettings[S](
+      val settings        = ActionBounce.PerformSettings[S](
         gain        = Gain.immediate(0f),
         realtime    = false,
-        fileFormat  = ActionBounceTimeline.FileFormat.PCM(sampleFormat = SampleFormat.Float),
+        fileFormat  = ActionBounce.FileFormat.PCM(sampleFormat = SampleFormat.Float),
         group       = tlH :: Nil,
         server      = sCfg,
+        client      = cCfg,
         span        = span,
         channels    = Vec(0 to (config.numChannels - 1))
       )
-      tryCompleteWith(p)(ActionBounceTimeline.perform(ctx.workspace, settings))
+      tryCompleteWith(p)(ActionBounce.perform(/*ctx.workspace,*/ settings))
     }
     p.future
   }
@@ -465,8 +466,8 @@ object LayerUtil {
                                               (run: File => Future[Unit])
                                               (implicit tx: S#Tx, ctx: Context[S]): FutCue[S] = {
     import SoundProcesses.executionContext
-    import ctx.{cursor, workspace}
-    val root      = workspace.root
+    import ctx.{cursor, universe}
+    val root      = universe.workspace.root
     val folderOut = Builder.mkFolder(root, folderName)
     val loc       = root.![ArtifactLocation]("base")
     val dirOut    = loc.directory / "audio_work" / folderName
