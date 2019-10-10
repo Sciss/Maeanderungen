@@ -2,7 +2,7 @@
  *  Preparation.scala
  *  (Mäanderungen)
  *
- *  Copyright (c) 2017-2018 Hanns Holger Rutz. All rights reserved.
+ *  Copyright (c) 2017-2019 Hanns Holger Rutz. All rights reserved.
  *
  *  This software is published under the GNU Affero General Public License v3+
  *
@@ -16,7 +16,7 @@ package de.sciss.maeanderungen
 import de.sciss.file._
 import de.sciss.fscape.lucre.FScape
 import de.sciss.fscape.lucre.MacroImplicits.FScapeMacroOps
-import de.sciss.lucre.artifact.{Artifact, ArtifactLocation}
+import de.sciss.lucre.artifact
 import de.sciss.lucre.expr.{BooleanObj, DoubleObj, IntObj, SpanLikeObj}
 import de.sciss.lucre.stm.Folder
 import de.sciss.lucre.synth.Sys
@@ -25,30 +25,37 @@ import de.sciss.span.Span
 import de.sciss.synth.proc.Action.attrSource
 import de.sciss.synth.proc.Implicits._
 import de.sciss.synth.proc.MacroImplicits._
-import de.sciss.synth.proc.{AudioCue, Color, GenContext, TimeRef, Timeline, Workspace}
+import de.sciss.synth.proc.{Color, GenContext, TimeRef, Workspace}
 import de.sciss.synth.{io, proc}
 
 object Preparation {
-  val DEFAULT_VERSION = 17
+  val DEFAULT_VERSION = 18
 
-  def process[S <: Sys[S]]()(implicit tx: S#Tx, workspace: Workspace[S]): Unit = {
+  def apply[S <: Sys[S]](config: Config)(implicit tx: S#Tx, workspace: Workspace[S]): Unit = {
     val r             = workspace.root
+    val loc           = mkObj[S, artifact.ArtifactLocation](r, "base", DEFAULT_VERSION) {
+      artifact.ArtifactLocation.newVar[S](config.baseDir)
+    }
     val fAna          = mkFolder(r, "analysis")
-    mkObj[S, proc.ActionRaw](fAna, "find-pauses", DEFAULT_VERSION)(mkActionFindPauses[S]())
+//    mkObj[S, proc.ActionRaw](fAna, "find-pauses", DEFAULT_VERSION)(mkActionFindPausesOLD[S]())
+    val fscFindPauses = mkObj[S, FScape](fAna, "find-pauses-fsc", DEFAULT_VERSION)(mkFScFindPauses[S]())
+    mkObj[S, proc.Control](fAna, "find-pauses", DEFAULT_VERSION)(mkCtlFindPauses[S](
+      fscFindPauses = fscFindPauses, baseDir = loc
+    ))
     mkObj[S, proc.ActionRaw](fAna, "remove-meta", DEFAULT_VERSION)(mkActionRemoveMeta[S]())
   }
 
-  def mkFScapeFindPauses[S <: Sys[S]]()(implicit tx: S#Tx): FScape[S] = {
+  def mkFScFindPauses[S <: Sys[S]]()(implicit tx: S#Tx): FScape[S] = {
     val f = FScape[S]
     import de.sciss.fscape.graph.{AudioFileIn => _, AudioFileOut => _, _}
     import de.sciss.fscape.lucre.graph.Ops._
     import de.sciss.fscape.lucre.graph._
 
     f.setGraph {
-      DC(17).take(1).poll(0, "VERSION")
+      DC(18).take(1).poll(0, "VERSION")
       val threshLoud    = 15.0
       val in0           = AudioFileIn("in")
-      val in            = Mix.MonoEqP(in0.elastic(7)) // XXX TOD -- Mix should be taking care of this
+      val in            = Mix.MonoEqP(in0.elastic(7)) // XXX TODO -- Mix should be taking care of this
       val sampleRate    = in0.sampleRate
       val inFrames      = in0.numFrames
 
@@ -110,10 +117,69 @@ object Preparation {
     f
   }
 
-  def mkActionFindPauses[S <: Sys[S]]()(implicit tx: S#Tx): proc.ActionRaw[S] = {
+  def mkCtlFindPauses[S <: Sys[S]](
+                                    fscFindPauses : FScape[S],
+                                    baseDir       : artifact.ArtifactLocation[S],
+                                  )(implicit tx: S#Tx): proc.Control[S] = {
+    val c = proc.Control[S]()
+    c.attr.put("fsc"  , fscFindPauses )
+    c.attr.put("base" , baseDir       )
+    import de.sciss.lucre.expr.graph._
+    import de.sciss.lucre.expr.ExImport._
+    import de.sciss.synth.proc.ExImport._
+    c.setGraph {
+      val cue       = "cue".attr[AudioCue](AudioCue.Empty())
+      val loc       = ArtifactLocation("base") // root.![ArtifactLocation]("base")
+      val fsc       = Runner("fsc")
+      val cueName   = cue.artifact.base
+      val isMale    = cueName.contains("_HH")
+      val dirAna    = loc / "analysis"
+      val fLoud     = dirAna / (cueName ++ "loud.aif"   )
+      val fPitch    = dirAna / (cueName ++ "pitch.aif"  )
+      val fPauses   = dirAna / (cueName ++ "pauses.aif" )
+      val artLoud   = Artifact("fsc:loud"  )
+      val artPitch  = Artifact("fsc:pitch" )
+      val artPauses = Artifact("fsc:pauses")
+      // val artLoud   = Artifact(loc, fLoud   )
+      // val artPitch  = Artifact(loc, fPitch  )
+      // val artPauses = Artifact(loc, fPauses )
+      // aFsc.put("loud"   , artLoud   )
+      // aFsc.put("pitch"  , artPitch  )
+      // aFsc.put("pauses" , artPauses )
+      val actRun = Act(
+        PrintLn("is-male? " ++ isMale.toStr),
+        artLoud   .set(fLoud  ),
+        artPitch  .set(fPitch ),
+        artPauses .set(fPauses),
+        fsc.runWith(
+          "in"      -> cue,
+          "is-male" -> isMale,
+        )
+      )
+      LoadBang() ---> actRun
+
+      val r = ThisRunner()
+
+      fsc.failed ---> Act(
+        r.fail(fsc.messages.mkString("FScape failed:\n", "", "")),
+      )
+
+      fsc.done ---> Act(
+        PrintLn("Analysis done."),
+        r.done,
+      )
+
+      //fsc.state.changed ---> PrintLn(fsc.state.toStr)
+    }
+    c
+  }
+
+  def mkActionFindPausesOLD[S <: Sys[S]]()(implicit tx: S#Tx): proc.ActionRaw[S] = {
     import proc.ActionRaw
     val act0 = proc.ActionRaw.apply[S] { universe =>
       import de.sciss.fscape.lucre.FScape
+      import de.sciss.synth.proc
+      import de.sciss.lucre.artifact.{ArtifactLocation, Artifact}
       import universe._
       //----crop
       println("----FIND PAUSES----")
@@ -121,7 +187,7 @@ object Preparation {
       val fMat = root.![Folder]("material")
 
       val nextOpt = fMat.iterator.collectFirst {
-        case a: AudioCue.Obj[S] if a.attr.$[Timeline  ]("pauses"  ).isEmpty ||
+        case a: proc.AudioCue.Obj[S] if a.attr.$[proc.Timeline  ]("pauses"  ).isEmpty ||
                                    a.attr.$[DoubleObj ]("loud-50" ).isEmpty => a
       }
       nextOpt.fold[Unit] {
@@ -129,7 +195,7 @@ object Preparation {
       } { cue =>
         val cueName   = cue.value.artifact.base
         println(s"Preparing $cueName...")
-        val hasPauses = cue.attr.$[Timeline]("pauses").isDefined
+        val hasPauses = cue.attr.$[proc.Timeline]("pauses").isDefined
         val fsc       = self.attr.![FScape]("fsc")
         val loc       = root.![ArtifactLocation]("base")
         val aFsc      = fsc.attr
@@ -171,8 +237,8 @@ object Preparation {
     }
 
     val act     = wrapAction(act0)
-    val fsc     = mkObjIn[S, FScape        ](act, "fsc" , DEFAULT_VERSION)(mkFScapeFindPauses    [S]())
-    val actDone = mkObjIn[S, proc.ActionRaw](act, "done", DEFAULT_VERSION)(mkActionFindPausesDone[S]())
+    val fsc     = mkObjIn[S, FScape        ](act, "fsc" , DEFAULT_VERSION)(mkFScFindPauses    [S]())
+    val actDone = mkObjIn[S, proc.ActionRaw](act, "done", DEFAULT_VERSION)(mkActionFindPausesDoneOLD[S]())
     fsc.attr.put("done", actDone)
     act
   }
@@ -180,13 +246,14 @@ object Preparation {
   def mkActionRemoveMeta[S <: Sys[S]]()(implicit tx: S#Tx): proc.ActionRaw[S] = {
     val act0 = proc.ActionRaw.apply[S] { universe =>
       import universe._
+      import de.sciss.synth.proc
       //----crop
       println("----REMOVE META----")
 
       val fMat = root.![Folder]("material")
 
       fMat.iterator.foreach {
-        case a: AudioCue.Obj[S] if a.attr.$[Timeline]("pauses").nonEmpty =>
+        case a: proc.AudioCue.Obj[S] if a.attr.$[proc.Timeline]("pauses").nonEmpty =>
           println(s"Removing meta data from ${a.name}")
           a.attr.remove("pauses")
         case _ =>
@@ -208,27 +275,29 @@ object Preparation {
       act
     }
 
-  def mkActionFindPausesDone[S <: Sys[S]]()(implicit tx: S#Tx): proc.ActionRaw[S] = {
+  def mkActionFindPausesDoneOLD[S <: Sys[S]]()(implicit tx: S#Tx): proc.ActionRaw[S] = {
     import proc.ActionRaw
     val act0 = proc.ActionRaw.apply[S] { universe =>
       import de.sciss.fscape.lucre.FScape
+      import de.sciss.synth.proc
+      import de.sciss.lucre.artifact.{ArtifactLocation, Artifact}
       import universe._
       //----crop
       println("----ACTION DONE")
 
       val shouldIter: Boolean = try {
         val Some(fsc: FScape[S]) = invoker  // self.attr.![FScape]("fsc")
-        val cue       = fsc.attr.![AudioCue.Obj]("in")
+        val cue       = fsc.attr.![proc.AudioCue.Obj]("in")
         val ca        = cue.attr
         val srIn      = cue.value.sampleRate
         val srRatio   = TimeRef.SampleRate / srIn
 
         // ---- loudness ----
 
-        val cueLoud = ca.$[AudioCue.Obj]("loud").getOrElse {
+        val cueLoud = ca.$[proc.AudioCue.Obj]("loud").getOrElse {
           val artLoud   = fsc.attr.![Artifact]("loud")
           val specLoud  = io.AudioFile.readSpec(artLoud .value)
-          val _cueLoud  = AudioCue.Obj(artLoud, specLoud, 0L, 1.0)
+          val _cueLoud  = proc.AudioCue.Obj(artLoud, specLoud, 0L, 1.0)
           ca.put("loud", _cueLoud)
           _cueLoud
         }
@@ -239,7 +308,7 @@ object Preparation {
 
           val artPitch  = fsc.attr.![Artifact]("pitch")
           val specPitch = io.AudioFile.readSpec(artPitch.value)
-          val cuePitch  = AudioCue.Obj(artPitch , specPitch , 0L, 1.0)
+          val cuePitch  = proc.AudioCue.Obj(artPitch , specPitch , 0L, 1.0)
           ca.put("pitch", cuePitch )
 
           val afPitch = io.AudioFile.openRead(artPitch.value)
@@ -313,8 +382,8 @@ object Preparation {
 
           val colrBreak = Color.Obj.newVar[S](Color.Palette(5))
 
-          val tlPauses = ca.$[Timeline]("pauses").getOrElse {
-            val tl = Timeline[S]
+          val tlPauses = ca.$[proc.Timeline]("pauses").getOrElse {
+            val tl = proc.Timeline[S]
             tl.name = "pauses"
             cue.attr.put("pauses", tl)
             tl

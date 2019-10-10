@@ -67,6 +67,7 @@ lazy val generator = project.withId(s"$baseNameL-generator").in(file("generator"
       "de.sciss"          %% "kollflitz"        % deps.main.kollFlitz,
       "de.sciss"          %% "mellite-app"      % deps.main.mellite,
       "de.sciss"          %% "soundprocesses"   % deps.main.soundProcesses,
+      "de.sciss"          %% "lucre-expr"       % deps.main.lucre,
       "de.sciss"          %% "lucre-bdb"        % deps.main.lucre,
       "de.sciss"          %% "fscape-lucre"     % deps.main.fscape,
       "de.sciss"          %% "fscape-macros"    % deps.main.fscape,
@@ -83,7 +84,7 @@ lazy val deps = new {
   val main = new {
     val fscape          = "2.31.0"
     val kollFlitz       = "0.2.3"
-    val lucre           = "3.15.2"
+    val lucre           = "3.15.3-SNAPSHOT"
     val mellite         = "2.40.0"
     val poirot          = "0.3.0"
     val scopt           = "3.7.1"

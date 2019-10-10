@@ -1,5 +1,5 @@
 /*
- *  Generator.scala
+ *  MakeWorkspace.scala
  *  (Mäanderungen)
  *
  *  Copyright (c) 2017-2019 Hanns Holger Rutz. All rights reserved.
@@ -13,22 +13,19 @@
 
 package de.sciss.maeanderungen
 
-import de.sciss.equal.Implicits._
 import de.sciss.file._
 import de.sciss.fscape.lucre.FScape
 import de.sciss.lucre.stm.store.BerkeleyDB
 import de.sciss.synth.proc
 import de.sciss.synth.proc.{Durable, SoundProcesses, Workspace}
 
-import scala.concurrent.duration.Duration
-import scala.concurrent.{Await, Future}
 import scala.util.control.NonFatal
 
-object Generator {
+object MakeWorkspace {
   def main(args: Array[String]): Unit = {
     val default = Config()
 
-    val p = new scopt.OptionParser[Config]("Preparation") {
+    val p = new scopt.OptionParser[Config]("MakeWorkspace") {
       opt[File]('w', "workspace")
         .required()
         .text(s"Input Mellite workspace that contains 'material' folder.")
@@ -53,13 +50,13 @@ object Generator {
         .text("Version for radio instead of installation")
         .action { (_, c) => c.copy(radio = true) }
 
-      opt[Unit]("no-prepare")
-        .text("Do not run preparation stage")
-        .action { (_, c) => c.copy(prepare = false) }
-
-      opt[Unit]("no-render")
-        .text("Do not run rendering stage")
-        .action { (_, c) => c.copy(render = false) }
+//      opt[Unit]("no-prepare")
+//        .text("Do not run preparation stage")
+//        .action { (_, c) => c.copy(prepare = false) }
+//
+//      opt[Unit]("no-render")
+//        .text("Do not run rendering stage")
+//        .action { (_, c) => c.copy(render = false) }
 
       opt[Double]("prob-transform-text")
         .text(s"Probability (0 to 1) for transformable text to be actually undergoing transformation (default: ${default.probTransformText})")
@@ -114,18 +111,18 @@ object Generator {
         .validate { v => if (v >= 1.0) success else failure("Must >= 1") }
         .action { (v, c) => c.copy(maxTextDur = v) }
 
-      opt[Unit]("backup")
-        .text("Backup workspace before modification")
-        .action { (_, c) => c.copy(backupWorkspace = true) }
+//      opt[Unit]("backup")
+//        .text("Backup workspace before modification")
+//        .action { (_, c) => c.copy(backupWorkspace = true) }
 
       opt[Unit]('f', "force-seed")
         .text("Force re-seeding of RNG")
         .action { (_, c) => c.copy(forceSeed = true) }
 
-      opt[Int]('i', "iterations")
-        .text(s"Number of iterations to run (default: ${default.iterations})")
-        .validate { v => if (v >= 1) success else failure("Must be >= 1") }
-        .action { (v, c) => c.copy(iterations = v) }
+//      opt[Int]('i', "iterations")
+//        .text(s"Number of iterations to run (default: ${default.iterations})")
+//        .validate { v => if (v >= 1) success else failure("Must be >= 1") }
+//        .action { (v, c) => c.copy(iterations = v) }
 
       opt[Double]("mask-noise-level")
         .text(s"Masking noise level in decibels (default: ${default.maskThreshNoiseDb})")
@@ -146,51 +143,26 @@ object Generator {
   }
 
   def run()(implicit config: Config): Unit = {
-//    Mellite.initTypes()
+    //    Mellite.initTypes()
     SoundProcesses.init()
     FScape        .init()
 
-    for (it <- 1 to config.iterations) {
-      if (config.backupWorkspace && config.ws.exists()) {
-        val fZip = Util.mkUnique(config.ws.replaceExt("zip"))
-        println(s"Making backup to ${fZip.name}")
-        import sys.process._
-        val p = Process(command = Seq("zip", "-r", "-q", fZip.path, config.ws.name), cwd = Some(config.ws.parent))
-        val res = p.! // Seq("zip", "-r", "-q", fZip.path, config.ws.path).!
-        require (res == 0, s"Failed to zip (return code $res)")
+    val store = BerkeleyDB.factory(config.ws, createIfNecessary = true)
+    val d = Workspace.Durable.empty(config.ws, store)
+    type S = Durable
+    implicit val _d: Workspace.Durable = d
+
+    try {
+      implicit val system: S = _d.system
+      system.step { implicit tx =>
+        implicit val u: proc.Universe[S] = proc.Universe[S]()
+        Preparation[S](config)
       }
-      val store = BerkeleyDB.factory(config.ws, createIfNecessary = false)
-      Workspace.read(config.ws, store) match {
-        case d: Workspace.Durable =>
-          type S = Durable
-          implicit val _d: Workspace.Durable = d
+      d.close()
 
-          println(s"Rendering ($it/${config.iterations})...")
-          if (it > 1) Thread.sleep(1000)
-
-          try {
-            implicit val system: S = _d.system
-            val futRender: Future[Unit] = system.step { implicit tx =>
-              implicit val u: proc.Universe[S] = proc.Universe[S]()
-              if (it === 1 && config.prepare) Preparation[S](config)
-              if (config.render             ) Layer       .process[S]() else Future.successful(())
-            }
-
-            try {
-              Await.result(futRender, Duration.Inf)
-            } finally {
-              d.close()
-            }
-
-          } catch {
-            case NonFatal(ex) =>
-              ex.printStackTrace()
-          }
-        case other =>
-          println(s"Cannot handle workspace $other")
-          other.close()
-          sys.exit(1)
-      }
+    } catch {
+      case NonFatal(ex) =>
+        ex.printStackTrace()
     }
     sys.exit()
   }
