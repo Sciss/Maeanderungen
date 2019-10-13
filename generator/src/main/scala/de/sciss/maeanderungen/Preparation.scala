@@ -42,10 +42,86 @@ object Preparation {
     mkObj[S, proc.Control](fAna, "find-pauses", DEFAULT_VERSION)(mkCtlFindPauses[S](
       fscFindPauses = fscFindPauses, baseDir = loc
     ))
-    mkObj[S, proc.ActionRaw](fAna, "remove-meta", DEFAULT_VERSION)(mkActionRemoveMeta[S]())
+    mkObj[S, proc.ActionRaw](fAna, "remove-meta", DEFAULT_VERSION)(mkActionRemoveMetaOLD[S]())
   }
 
   def mkFScFindPauses[S <: Sys[S]]()(implicit tx: S#Tx): FScape[S] = {
+    val f = FScape[S]
+    import de.sciss.fscape.graph.{AudioFileIn => _, AudioFileOut => _, _}
+    import de.sciss.fscape.lucre.graph.Ops._
+    import de.sciss.fscape.lucre.graph._
+
+    f.setGraph {
+      DC(18).take(1).poll(0, "VERSION")
+      val threshLoud    = 15.0
+      val in0           = AudioFileIn("in")
+      val in            = Mix.MonoEqP(in0.elastic(7)) // XXX TODO -- Mix should be taking care of this
+      val sampleRate    = in0.sampleRate
+      val inFrames      = in0.numFrames
+
+      // loudness
+      val winLoud       = (0.2 * sampleRate).floor
+      val stepLoud      = (winLoud/4).floor
+      val framesLoud    = ((inFrames + stepLoud - 1) / stepLoud).floor
+      val slidLoud      = Sliding(in, size = winLoud, step = stepLoud)
+      val loud          = Loudness(slidLoud, sampleRate = sampleRate, size = winLoud, spl = 70, diffuse = 1)
+
+      // pauses
+      val medianLoud    = SlidingPercentile(loud, len = 5)
+      val foreground    = medianLoud > threshLoud
+      val fgDif         = Differentiate(foreground)
+      val toBack        = fgDif sig_== -1
+      val toFront       = fgDif sig_== +1
+      val offLoud       = Frames(fgDif)
+      val pauseStart    = FilterSeq(offLoud, toBack) // .dropRight(1) -- not yet implemented
+      val pauseStop     = FilterSeq(offLoud, toFront  ).drop(1)
+      val spans         = ((pauseStart zip pauseStop) - 1) * stepLoud
+      val srLoud        = sampleRate / stepLoud
+
+      // pitch
+      val isMale        = "is-male".attr(0) // determine pitch tracking register
+
+      val (pitch, srPitch, framesPitch) = {
+        val minPitch            = 100.0 - (isMale *  40.0) // if (isMale)  60.0 else 100.0 // 100.0
+        val maxPitch            = 320.0 - (isMale * 120.0) // if (isMale) 200.0 else 320.0 // 1000.0
+        val voicingThresh       = 0.45
+        val silenceThresh       = 0.03
+        val octaveCost          = 0.01
+        val octaveJumpCost      = 0.35
+        val voicedUnvoicedCost  = 0.14
+        val numTracks           = 15
+
+        val _pch = PitchAC(in, sampleRate = sampleRate, pitchMin = minPitch, pitchMax = maxPitch,
+          voicingThresh = voicingThresh, silenceThresh = silenceThresh, octaveCost = octaveCost,
+          octaveJumpCost = octaveJumpCost, voicedUnvoicedCost = voicedUnvoicedCost,
+          numCandidates = numTracks)
+
+        val stepPitch   = _pch.stepSize
+        val _frames     = ((inFrames + stepPitch - 1) / stepPitch).floor
+
+        val _sr = sampleRate / stepPitch
+        (_pch, _sr, _frames)
+      }
+
+      // write
+      val writtenLoud   = AudioFileOut("loud"   , loud , sampleRate = srLoud  )
+      val writtenPitch  = AudioFileOut("pitch"  , pitch, sampleRate = srPitch )
+      /* val writtenSpans  = */ AudioFileOut("pauses" , spans)
+      // val writtenAll    = writtenLoud ++ writtenPitch ++ writtenSpans
+
+      // percentile(50), percentile(80), percentile(95))
+      Seq(50, 80, 95).foreach { p =>
+        val loudP = SlidingPercentile(loud, len = framesLoud, frac = p * 0.01)
+        MkDouble(s"loud-$p", loudP.last)
+      }
+
+      Progress(writtenLoud  / framesLoud  , Metro(srLoud  ), "loudness")
+      Progress(writtenPitch / framesPitch , Metro(srPitch ), "pitch"   )
+    }
+    f
+  }
+
+  def mkFScFindPausesOLD[S <: Sys[S]]()(implicit tx: S#Tx): FScape[S] = {
     val f = FScape[S]
     import de.sciss.fscape.graph.{AudioFileIn => _, AudioFileOut => _, _}
     import de.sciss.fscape.lucre.graph.Ops._
@@ -146,6 +222,10 @@ object Preparation {
       // aFsc.put("loud"   , artLoud   )
       // aFsc.put("pitch"  , artPitch  )
       // aFsc.put("pauses" , artPauses )
+      val loud50    = Var[Double]()
+      val loud80    = Var[Double]()
+      val loud95    = Var[Double]()
+
       val actRun = Act(
         PrintLn("is-male? " ++ isMale.toStr),
         artLoud   .set(fLoud  ),
@@ -154,6 +234,9 @@ object Preparation {
         fsc.runWith(
           "in"      -> cue,
           "is-male" -> isMale,
+          "loud-50" -> loud50,
+          "loud-80" -> loud80,
+          "loud-95" -> loud95,
         )
       )
       LoadBang() ---> actRun
@@ -165,7 +248,8 @@ object Preparation {
       )
 
       fsc.done ---> Act(
-        PrintLn("Analysis done."),
+        PrintLn("Analysis done. loud-50 = %1.1f, loud-80 = %1.1f, loud-95 = %1.1f"
+          .format(loud50, loud80, loud95)),
         r.done,
       )
 
@@ -237,13 +321,13 @@ object Preparation {
     }
 
     val act     = wrapAction(act0)
-    val fsc     = mkObjIn[S, FScape        ](act, "fsc" , DEFAULT_VERSION)(mkFScFindPauses    [S]())
+    val fsc     = mkObjIn[S, FScape        ](act, "fsc" , DEFAULT_VERSION)(mkFScFindPausesOLD       [S]())
     val actDone = mkObjIn[S, proc.ActionRaw](act, "done", DEFAULT_VERSION)(mkActionFindPausesDoneOLD[S]())
-    fsc.attr.put("done", actDone)
+    fsc.attr.put("done", actDone) // XXX TODO --- not used
     act
   }
 
-  def mkActionRemoveMeta[S <: Sys[S]]()(implicit tx: S#Tx): proc.ActionRaw[S] = {
+  def mkActionRemoveMetaOLD[S <: Sys[S]]()(implicit tx: S#Tx): proc.ActionRaw[S] = {
     val act0 = proc.ActionRaw.apply[S] { universe =>
       import universe._
       import de.sciss.synth.proc
@@ -280,7 +364,7 @@ object Preparation {
     val act0 = proc.ActionRaw.apply[S] { universe =>
       import de.sciss.fscape.lucre.FScape
       import de.sciss.synth.proc
-      import de.sciss.lucre.artifact.{ArtifactLocation, Artifact}
+      import de.sciss.lucre.artifact.Artifact
       import universe._
       //----crop
       println("----ACTION DONE")
