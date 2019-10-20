@@ -320,7 +320,7 @@ object Preparation {
       }
     }
 
-    val act     = wrapAction(act0)
+    val act     = wrapActionOLD(act0)
     val fsc     = mkObjIn[S, FScape        ](act, "fsc" , DEFAULT_VERSION)(mkFScFindPausesOLD       [S]())
     val actDone = mkObjIn[S, proc.ActionRaw](act, "done", DEFAULT_VERSION)(mkActionFindPausesDoneOLD[S]())
     fsc.attr.put("done", actDone) // XXX TODO --- not used
@@ -344,11 +344,11 @@ object Preparation {
       }
     }
 
-    val act = wrapAction(act0)
+    val act = wrapActionOLD(act0)
     act
   }
 
-  private def wrapAction[S <: Sys[S]](value: proc.ActionRaw[S])(implicit tx: S#Tx): proc.ActionRaw[S] =
+  private def wrapActionOLD[S <: Sys[S]](value: proc.ActionRaw[S])(implicit tx: S#Tx): proc.ActionRaw[S] =
     value match {
       case proc.ActionRaw.Var(vr) => vr
       case _ =>
@@ -533,7 +533,7 @@ object Preparation {
       }
     }
 
-    val act = wrapAction(act0)
+    val act = wrapActionOLD(act0)
     act
   }
 }
