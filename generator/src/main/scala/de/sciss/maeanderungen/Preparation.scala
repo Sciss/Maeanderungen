@@ -16,12 +16,10 @@ package de.sciss.maeanderungen
 import de.sciss.file._
 import de.sciss.fscape.lucre.FScape
 import de.sciss.fscape.lucre.MacroImplicits.FScapeMacroOps
-import de.sciss.lucre.artifact
 import de.sciss.lucre.expr.{BooleanObj, DoubleObj, IntObj, SpanLikeObj}
 import de.sciss.lucre.stm.Folder
 import de.sciss.lucre.synth.Sys
 import de.sciss.maeanderungen.Builder._
-import de.sciss.span.Span
 import de.sciss.synth.proc.Action.attrSource
 import de.sciss.synth.proc.Implicits._
 import de.sciss.synth.proc.MacroImplicits._
@@ -33,26 +31,28 @@ object Preparation {
 
   def apply[S <: Sys[S]](config: Config)(implicit tx: S#Tx, workspace: Workspace[S]): Unit = {
     val r             = workspace.root
-    val loc           = mkObj[S, artifact.ArtifactLocation](r, "base", DEFAULT_VERSION) {
-      artifact.ArtifactLocation.newVar[S](config.baseDir)
-    }
+//    val loc           = mkObj[S, artifact.ArtifactLocation](r, "base", DEFAULT_VERSION) {
+//      artifact.ArtifactLocation.newVar[S](config.baseDir)
+//    }
     val fAna          = mkFolder(r, "analysis")
 //    mkObj[S, proc.ActionRaw](fAna, "find-pauses", DEFAULT_VERSION)(mkActionFindPausesOLD[S]())
     val fscFindPauses = mkObj[S, FScape](fAna, "find-pauses-fsc", DEFAULT_VERSION)(mkFScFindPauses[S]())
     mkObj[S, proc.Control](fAna, "find-pauses", DEFAULT_VERSION)(mkCtlFindPauses[S](
-      fscFindPauses = fscFindPauses, baseDir = loc
+      fscFindPauses = fscFindPauses,
+//      baseDir = loc,
     ))
     mkObj[S, proc.ActionRaw](fAna, "remove-meta", DEFAULT_VERSION)(mkActionRemoveMetaOLD[S]())
   }
 
   def mkFScFindPauses[S <: Sys[S]]()(implicit tx: S#Tx): FScape[S] = {
     val f = FScape[S]
+    import de.sciss.fscape.GE
     import de.sciss.fscape.graph.{AudioFileIn => _, AudioFileOut => _, _}
     import de.sciss.fscape.lucre.graph.Ops._
     import de.sciss.fscape.lucre.graph._
 
     f.setGraph {
-      DC(18).take(1).poll(0, "VERSION")
+      (19: GE).poll("VERSION")
       val threshLoud    = 15.0
       val in0           = AudioFileIn("in")
       val in            = Mix.MonoEqP(in0.elastic(7)) // XXX TODO -- Mix should be taking care of this
@@ -74,12 +74,14 @@ object Preparation {
       val toFront       = fgDif sig_== +1
       val offLoud       = Frames(fgDif)
       val pauseStart    = FilterSeq(offLoud, toBack) // .dropRight(1) -- not yet implemented
-      val pauseStop     = FilterSeq(offLoud, toFront  ).drop(1)
-      val spans         = ((pauseStart zip pauseStop) - 1) * stepLoud
+      val pauseStop     = FilterSeq(offLoud, toFront).drop(1)
       val srLoud        = sampleRate / stepLoud
 
+      MkIntVector("pause-start", pauseStart * stepLoud)
+      MkIntVector("pause-stop" , pauseStop  * stepLoud)
+
       // pitch
-      val isMale        = "is-male".attr(0) // determine pitch tracking register
+      val isMale = "is-male".attr(0) // determine pitch tracking register
 
       val (pitch, srPitch, framesPitch) = {
         val minPitch            = 100.0 - (isMale *  40.0) // if (isMale)  60.0 else 100.0 // 100.0
@@ -103,11 +105,41 @@ object Preparation {
         (_pch, _sr, _frames)
       }
 
-      // write
-      val writtenLoud   = AudioFileOut("loud"   , loud , sampleRate = srLoud  )
-      val writtenPitch  = AudioFileOut("pitch"  , pitch, sampleRate = srPitch )
-      /* val writtenSpans  = */ AudioFileOut("pauses" , spans)
-      // val writtenAll    = writtenLoud ++ writtenPitch ++ writtenSpans
+      def LastInWindow(in: GE, size: GE): GE =
+        WindowApply(in, size = size, index = -1, mode = 1)
+
+      def WindowSum(in: GE, size: GE): GE =
+        LastInWindow(RunningSum(in, Metro(size)), size)
+
+      val isPitchDown: GE = {
+        val rateScale   = srPitch / srLoud
+        val pitchDirNum = (srPitch * 0.7).floor // toInt
+        val maxLen      = pitchDirNum * 1.5
+
+        val pchSpanStop     = (pauseStart * rateScale).floor
+        val pchSpanStart    = (pchSpanStop - maxLen).max(0)
+        val pchSpans        = pchSpanStart zip pchSpanStop
+        val pchSpanLen      = pchSpanStop - pchSpanStart
+        val pchSlice        = Slices(pitch, pchSpans)
+        val pchSliceRev     = ReverseWindow(pchSlice, pchSpanLen)
+        val pchSliceVoiced  = pchSliceRev > 0
+        val numVoiced0      = WindowSum(pchSliceVoiced, pchSpanLen)
+        val pchSliceRevF    = FilterSeq(pchSliceRev, pchSliceVoiced)
+        val numVoiced       = numVoiced0.min(pitchDirNum)
+        val dStop           = numVoiced - numVoiced0
+        val pchSliceSmooth  = ResizeWindow(pchSliceRevF, numVoiced0, stop = dStop) // OnePole(pchSliceRevF, ???)
+        val halfWinSize     = (numVoiced/2).floor
+        val halfWinSizeH    = numVoiced - halfWinSize
+        val firstHalf       = ResizeWindow(pchSliceSmooth, numVoiced, stop  = -halfWinSize)
+        val secondHalf      = ResizeWindow(pchSliceSmooth, numVoiced, start =  halfWinSize)
+        val tail            = WindowSum(firstHalf , halfWinSizeH)
+        val init            = WindowSum(secondHalf, halfWinSizeH)
+        tail < init
+      }
+
+      isPitchDown.poll(1, "is-pitch-down")
+
+      MkIntVector("pitch-down" , isPitchDown)
 
       // percentile(50), percentile(80), percentile(95))
       Seq(50, 80, 95).foreach { p =>
@@ -115,8 +147,7 @@ object Preparation {
         MkDouble(s"loud-$p", loudP.last)
       }
 
-      Progress(writtenLoud  / framesLoud  , Metro(srLoud  ), "loudness")
-      Progress(writtenPitch / framesPitch , Metro(srPitch ), "pitch"   )
+      //ProgressFrames(writtenPitch, framesPitch, "pitch")
     }
     f
   }
@@ -195,48 +226,34 @@ object Preparation {
 
   def mkCtlFindPauses[S <: Sys[S]](
                                     fscFindPauses : FScape[S],
-                                    baseDir       : artifact.ArtifactLocation[S],
                                   )(implicit tx: S#Tx): proc.Control[S] = {
     val c = proc.Control[S]()
     c.attr.put("fsc"  , fscFindPauses )
-    c.attr.put("base" , baseDir       )
-    import de.sciss.lucre.expr.graph._
     import de.sciss.lucre.expr.ExImport._
+    import de.sciss.lucre.expr.graph._
     import de.sciss.synth.proc.ExImport._
     c.setGraph {
       val cue       = "cue".attr[AudioCue](AudioCue.Empty())
-      val loc       = ArtifactLocation("base") // root.![ArtifactLocation]("base")
       val fsc       = Runner("fsc")
       val cueName   = cue.artifact.base
       val isMale    = cueName.contains("_HH")
-      val dirAna    = loc / "analysis"
-      val fLoud     = dirAna / (cueName ++ "loud.aif"   )
-      val fPitch    = dirAna / (cueName ++ "pitch.aif"  )
-      val fPauses   = dirAna / (cueName ++ "pauses.aif" )
-      val artLoud   = Artifact("fsc:loud"  )
-      val artPitch  = Artifact("fsc:pitch" )
-      val artPauses = Artifact("fsc:pauses")
-      // val artLoud   = Artifact(loc, fLoud   )
-      // val artPitch  = Artifact(loc, fPitch  )
-      // val artPauses = Artifact(loc, fPauses )
-      // aFsc.put("loud"   , artLoud   )
-      // aFsc.put("pitch"  , artPitch  )
-      // aFsc.put("pauses" , artPauses )
       val loud50    = Var[Double]()
       val loud80    = Var[Double]()
       val loud95    = Var[Double]()
+      val pauseStart= Var[Seq[Int]]()
+      val pauseStop = Var[Seq[Int]]()
+      val pitchDown = Var[Seq[Int]]()
 
       val actRun = Act(
-        PrintLn("is-male? " ++ isMale.toStr),
-        artLoud   .set(fLoud  ),
-        artPitch  .set(fPitch ),
-        artPauses .set(fPauses),
         fsc.runWith(
           "in"      -> cue,
           "is-male" -> isMale,
           "loud-50" -> loud50,
           "loud-80" -> loud80,
           "loud-95" -> loud95,
+          "pause-start" -> pauseStart,
+          "pause-stop"  -> pauseStop,
+          "pitch-down"  -> pitchDown,
         )
       )
       LoadBang() ---> actRun
@@ -247,9 +264,22 @@ object Preparation {
         r.fail(fsc.messages.mkString("FScape failed:\n", "", "")),
       )
 
+      val tlPauseOut = "cue:pauses".attr[Timeline]
+      val tlPause = Timeline()
+
+      val rateScale = SampleRate / cue.sampleRate
+
+      val pauses = (pauseStart zip pauseStop).map { tup =>
+        Span((tup._1 * rateScale).toLong, (tup._2 * rateScale).toLong)
+      }
+
       fsc.done ---> Act(
-        PrintLn("Analysis done. loud-50 = %1.1f, loud-80 = %1.1f, loud-95 = %1.1f"
-          .format(loud50, loud80, loud95)),
+        PrintLn("Analysis done. loud-50 = %1.1f, loud-80 = %1.1f, loud-95 = %1.1f, num-pauses = %d"
+          .format(loud50, loud80, loud95, pauses.size)),
+        // PrintLn(pauses.mkString(", ")),
+        tlPause.make,
+        tlPauseOut.set(tlPause),
+        tlPause.addAll(pauses zip pitchDown.map(i => i)),
         r.done,
       )
 
@@ -262,8 +292,8 @@ object Preparation {
     import proc.ActionRaw
     val act0 = proc.ActionRaw.apply[S] { universe =>
       import de.sciss.fscape.lucre.FScape
+      import de.sciss.lucre.artifact.{Artifact, ArtifactLocation}
       import de.sciss.synth.proc
-      import de.sciss.lucre.artifact.{ArtifactLocation, Artifact}
       import universe._
       //----crop
       println("----FIND PAUSES----")
@@ -329,8 +359,8 @@ object Preparation {
 
   def mkActionRemoveMetaOLD[S <: Sys[S]]()(implicit tx: S#Tx): proc.ActionRaw[S] = {
     val act0 = proc.ActionRaw.apply[S] { universe =>
-      import universe._
       import de.sciss.synth.proc
+      import universe._
       //----crop
       println("----REMOVE META----")
 
@@ -361,10 +391,11 @@ object Preparation {
 
   def mkActionFindPausesDoneOLD[S <: Sys[S]]()(implicit tx: S#Tx): proc.ActionRaw[S] = {
     import proc.ActionRaw
+    import de.sciss.span.Span
     val act0 = proc.ActionRaw.apply[S] { universe =>
       import de.sciss.fscape.lucre.FScape
-      import de.sciss.synth.proc
       import de.sciss.lucre.artifact.Artifact
+      import de.sciss.synth.proc
       import universe._
       //----crop
       println("----ACTION DONE")

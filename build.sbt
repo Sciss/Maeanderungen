@@ -82,13 +82,13 @@ lazy val generator = project.withId(s"$baseNameL-generator").in(file("generator"
 
 lazy val deps = new {
   val main = new {
-    val fscape          = "2.31.0"
+    val fscape          = "2.32.0-SNAPSHOT"
     val kollFlitz       = "0.2.3"
-    val lucre           = "3.15.3"
-    val mellite         = "2.40.0"
+    val lucre           = "3.15.4-SNAPSHOT"
+    val mellite         = "2.41.0-SNAPSHOT"
     val poirot          = "0.3.0"
     val scopt           = "3.7.1"
-    val soundProcesses  = "3.32.2"
+    val soundProcesses  = "3.32.3-SNAPSHOT"
     val travellingAnts  = "0.1.1"
   }
 }
