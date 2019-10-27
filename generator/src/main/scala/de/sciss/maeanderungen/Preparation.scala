@@ -23,7 +23,7 @@ import de.sciss.maeanderungen.Builder._
 import de.sciss.synth.proc.Action.attrSource
 import de.sciss.synth.proc.Implicits._
 import de.sciss.synth.proc.MacroImplicits._
-import de.sciss.synth.proc.{Color, GenContext, TimeRef, Workspace}
+import de.sciss.synth.proc.{GenContext, TimeRef, Workspace}
 import de.sciss.synth.{io, proc}
 
 object Preparation {
@@ -83,7 +83,7 @@ object Preparation {
       // pitch
       val isMale = "is-male".attr(0) // determine pitch tracking register
 
-      val (pitch, srPitch, framesPitch) = {
+      val (pitch, srPitch /*, framesPitch*/) = {
         val minPitch            = 100.0 - (isMale *  40.0) // if (isMale)  60.0 else 100.0 // 100.0
         val maxPitch            = 320.0 - (isMale * 120.0) // if (isMale) 200.0 else 320.0 // 1000.0
         val voicingThresh       = 0.45
@@ -99,10 +99,10 @@ object Preparation {
           numCandidates = numTracks)
 
         val stepPitch   = _pch.stepSize
-        val _frames     = ((inFrames + stepPitch - 1) / stepPitch).floor
+        // val _frames     = ((inFrames + stepPitch - 1) / stepPitch).floor
 
         val _sr = sampleRate / stepPitch
-        (_pch, _sr, _frames)
+        (_pch, _sr) // , _frames
       }
 
       def LastInWindow(in: GE, size: GE): GE =
@@ -234,6 +234,7 @@ object Preparation {
     import de.sciss.synth.proc.ExImport._
     c.setGraph {
       val cue       = "cue".attr[AudioCue](AudioCue.Empty())
+      // val loc       = ArtifactLocation("base")
       val fsc       = Runner("fsc")
       val cueName   = cue.artifact.base
       val isMale    = cueName.contains("_HH")
@@ -245,6 +246,7 @@ object Preparation {
       val pitchDown = Var[Seq[Int]]()
 
       val actRun = Act(
+        //  PrintLn("is-male? " ++ isMale.toStr),
         fsc.runWith(
           "in"      -> cue,
           "is-male" -> isMale,
@@ -273,13 +275,26 @@ object Preparation {
         Span((tup._1 * rateScale).toLong, (tup._2 * rateScale).toLong)
       }
 
+      val makeObjects = (pauses zip pitchDown).map { tup =>
+        val span  = tup._1
+        val pchDn = tup._2  > 0
+        val obj  = Const(0).asObj
+        Act(
+          obj.make,
+          obj.attr[String]("name").set("pause"),
+          If (pchDn) Then obj.attr[Color]("color").set(Color.Yellow),
+          tlPause.add(span, obj)
+        )
+      }
+
       fsc.done ---> Act(
         PrintLn("Analysis done. loud-50 = %1.1f, loud-80 = %1.1f, loud-95 = %1.1f, num-pauses = %d"
           .format(loud50, loud80, loud95, pauses.size)),
         // PrintLn(pauses.mkString(", ")),
         tlPause.make,
+        //  tlPause.attr[String]("name").set("pauses"),
+        makeObjects,
         tlPauseOut.set(tlPause),
-        tlPause.addAll(pauses zip pitchDown.map(i => i)),
         r.done,
       )
 
@@ -495,7 +510,7 @@ object Preparation {
             }
           }
 
-          val colrBreak = Color.Obj.newVar[S](Color.Palette(5))
+          val colrBreak = proc.Color.Obj.newVar[S](proc.Color.Palette(5))
 
           val tlPauses = ca.$[proc.Timeline]("pauses").getOrElse {
             val tl = proc.Timeline[S]
